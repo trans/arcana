@@ -1,0 +1,28 @@
+require "json"
+
+require "./arcana/trace"
+require "./arcana/error"
+require "./arcana/util/hash"
+require "./arcana/util/http"
+require "./arcana/util/multipart"
+require "./arcana/image/identity"
+require "./arcana/image/control"
+require "./arcana/image/request"
+require "./arcana/image/result"
+require "./arcana/image/provider"
+require "./arcana/image/runware"
+require "./arcana/image/openai"
+require "./arcana/chat/message"
+require "./arcana/chat/tool"
+require "./arcana/chat/request"
+require "./arcana/chat/response"
+require "./arcana/chat/provider"
+require "./arcana/chat/openai"
+require "./arcana/tts/request"
+require "./arcana/tts/result"
+require "./arcana/tts/provider"
+require "./arcana/tts/openai"
+
+module Arcana
+  VERSION = "0.1.0"
+end
