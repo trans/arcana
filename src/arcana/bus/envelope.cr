@@ -32,5 +32,30 @@ module Arcana
         correlation_id: @correlation_id,
       )
     end
+
+    def to_json(json : JSON::Builder) : Nil
+      json.object do
+        json.field "from", @from
+        json.field "to", @to
+        json.field "subject", @subject
+        json.field "payload", @payload
+        json.field "correlation_id", @correlation_id
+        json.field "reply_to", @reply_to if @reply_to
+        json.field "timestamp", @timestamp.to_rfc3339
+      end
+    end
+
+    def self.from_json(raw : String) : self
+      parsed = JSON.parse(raw)
+      new(
+        from: parsed["from"].as_s,
+        to: parsed["to"]?.try(&.as_s?) || "",
+        subject: parsed["subject"]?.try(&.as_s?) || "",
+        payload: parsed["payload"]? || JSON::Any.new(nil),
+        correlation_id: parsed["correlation_id"]?.try(&.as_s?) || Random::Secure.hex(8),
+        reply_to: parsed["reply_to"]?.try(&.as_s?),
+        timestamp: parsed["timestamp"]?.try { |t| Time.parse_rfc3339(t.as_s) } || Time.utc,
+      )
+    end
   end
 end

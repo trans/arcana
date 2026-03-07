@@ -28,6 +28,9 @@ require "./arcana/embed/result"
 require "./arcana/embed/provider"
 require "./arcana/embed/openai"
 require "./arcana/bus"
+require "./arcana/actor"
+require "./arcana/supervisor"
+require "./arcana/server"
 require "./arcana/registry"
 
 module Arcana
