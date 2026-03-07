@@ -87,6 +87,12 @@ module Arcana
           ctx.response.print %({"error":"not found"})
         end
 
+      when {"POST", "/register"}
+        handle_post_register(ctx)
+
+      when {"POST", "/receive"}
+        handle_post_receive(ctx)
+
       when {"POST", "/send"}
         handle_post_send(ctx)
 
@@ -100,6 +106,70 @@ module Arcana
         ctx.response.status = HTTP::Status::NOT_FOUND
         ctx.response.print %({"error":"not found"})
       end
+    end
+
+    private def handle_post_register(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed["address"]?.try(&.as_s?) || ""
+      raise "address required" if address.empty?
+
+      # Create mailbox so messages can be received
+      @bus.mailbox(address)
+
+      # Register in directory if listing info provided
+      if parsed["name"]?
+        @directory.register(Directory::Listing.new(
+          address: address,
+          name: parsed["name"]?.try(&.as_s?) || address,
+          description: parsed["description"]?.try(&.as_s?) || "",
+          kind: parsed["kind"]?.try(&.as_s?) == "service" ? Directory::Kind::Service : Directory::Kind::Agent,
+          schema: parsed["schema"]?,
+          guide: parsed["guide"]?.try(&.as_s?),
+          tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
+        ))
+      end
+
+      ctx.response.print %({"ok":true,"address":"#{address}"})
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    private def handle_post_receive(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed["address"]?.try(&.as_s?) || ""
+      raise "address required" if address.empty?
+
+      timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 0
+
+      unless @bus.has_mailbox?(address)
+        # Auto-create mailbox on first receive
+        @bus.mailbox(address)
+      end
+
+      mb = @bus.mailbox(address)
+      messages = [] of Envelope
+
+      if timeout_ms > 0 && messages.empty?
+        # Wait for first message up to timeout, then drain the rest
+        if msg = mb.receive(timeout_ms.milliseconds)
+          messages << msg
+          # Drain any additional messages that arrived
+          while (extra = mb.try_receive)
+            messages << extra
+          end
+        end
+      else
+        # Non-blocking drain
+        while (msg = mb.try_receive)
+          messages << msg
+        end
+      end
+
+      ctx.response.print messages.to_json
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
     end
 
     private def handle_post_send(ctx : HTTP::Server::Context)

@@ -33,6 +33,7 @@ module Arcana
         inputSchema: {
           type:       "object",
           properties: {
+            from:       {type: "string", description: "Your address on the bus (so replies come back to you)"},
             to:         {type: "string", description: "Target address on the bus"},
             subject:    {type: "string", description: "Message subject/intent"},
             payload:    {description: "Message payload (any JSON value)"},
@@ -47,6 +48,7 @@ module Arcana
         inputSchema: {
           type:       "object",
           properties: {
+            from:    {type: "string", description: "Your address on the bus"},
             to:      {type: "string", description: "Target address on the bus"},
             subject: {type: "string", description: "Message subject"},
             payload: {description: "Message payload (any JSON value)"},
@@ -65,6 +67,34 @@ module Arcana
             payload: {description: "Message payload (any JSON value)"},
           },
           required: ["topic"],
+        },
+      },
+      {
+        name:        "arcana_register",
+        description: "Register yourself as an agent on the Arcana bus. Creates a mailbox so you can receive messages. Optionally registers in the directory with name/description.",
+        inputSchema: {
+          type:       "object",
+          properties: {
+            address:     {type: "string", description: "Your address on the bus"},
+            name:        {type: "string", description: "Display name for the directory"},
+            description: {type: "string", description: "What you do (for the directory)"},
+            kind:        {type: "string", enum: ["agent", "service"], description: "Agent or service (default: agent)"},
+            guide:       {type: "string", description: "How-to guide for interacting with you"},
+            tags:        {type: "array", items: {type: "string"}, description: "Tags for discovery"},
+          },
+          required: ["address"],
+        },
+      },
+      {
+        name:        "arcana_receive",
+        description: "Check your mailbox for incoming messages. Returns an array of envelopes. Use timeout_ms to wait for messages if the mailbox is empty.",
+        inputSchema: {
+          type:       "object",
+          properties: {
+            address:    {type: "string", description: "Your address on the bus"},
+            timeout_ms: {type: "integer", description: "How long to wait for a message if mailbox is empty (0 = don't wait, default: 0)"},
+          },
+          required: ["address"],
         },
       },
       {
@@ -150,6 +180,10 @@ module Arcana
         call_send(args)
       when "arcana_publish"
         call_publish(args)
+      when "arcana_register"
+        call_register(args)
+      when "arcana_receive"
+        call_receive(args)
       when "arcana_health"
         call_health
       else
@@ -175,18 +209,18 @@ module Arcana
 
     private def call_request(args : JSON::Any) : String
       body = {
-        from:           "mcp-bridge",
-        to:             args["to"]?.try(&.as_s?) || "",
-        subject:        args["subject"]?.try(&.as_s?) || "",
-        payload:        args["payload"]? || JSON::Any.new(nil),
-        timeout_ms:     args["timeout_ms"]?.try(&.as_i?) || 30_000,
+        from:       args["from"]?.try(&.as_s?) || "mcp-bridge",
+        to:         args["to"]?.try(&.as_s?) || "",
+        subject:    args["subject"]?.try(&.as_s?) || "",
+        payload:    args["payload"]? || JSON::Any.new(nil),
+        timeout_ms: args["timeout_ms"]?.try(&.as_i?) || 30_000,
       }.to_json
       http_post("/request", body)
     end
 
     private def call_send(args : JSON::Any) : String
       body = {
-        from:    "mcp-bridge",
+        from:    args["from"]?.try(&.as_s?) || "mcp-bridge",
         to:      args["to"]?.try(&.as_s?) || "",
         subject: args["subject"]?.try(&.as_s?) || "",
         payload: args["payload"]? || JSON::Any.new(nil),
@@ -196,12 +230,32 @@ module Arcana
 
     private def call_publish(args : JSON::Any) : String
       body = {
-        from:    "mcp-bridge",
+        from:    args["from"]?.try(&.as_s?) || "mcp-bridge",
         topic:   args["topic"]?.try(&.as_s?) || "",
         subject: args["subject"]?.try(&.as_s?) || "",
         payload: args["payload"]? || JSON::Any.new(nil),
       }.to_json
       http_post("/publish", body)
+    end
+
+    private def call_register(args : JSON::Any) : String
+      body = {
+        address:     args["address"]?.try(&.as_s?) || "",
+        name:        args["name"]?.try(&.as_s?),
+        description: args["description"]?.try(&.as_s?),
+        kind:        args["kind"]?.try(&.as_s?),
+        guide:       args["guide"]?.try(&.as_s?),
+        tags:        args["tags"]?,
+      }.to_json
+      http_post("/register", body)
+    end
+
+    private def call_receive(args : JSON::Any) : String
+      body = {
+        address:    args["address"]?.try(&.as_s?) || "",
+        timeout_ms: args["timeout_ms"]?.try(&.as_i?) || 0,
+      }.to_json
+      http_post("/receive", body)
     end
 
     private def call_health : String

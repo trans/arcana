@@ -15,6 +15,8 @@ describe Arcana::MCP do
     names.should contain("arcana_request")
     names.should contain("arcana_send")
     names.should contain("arcana_publish")
+    names.should contain("arcana_register")
+    names.should contain("arcana_receive")
     names.should contain("arcana_health")
   end
 
@@ -34,7 +36,7 @@ describe Arcana::MCP do
     response = mcp.test_handle(msg)
     response.should_not be_nil
     tools = response.not_nil!["result"]["tools"].as_a
-    tools.size.should eq(5)
+    tools.size.should eq(7)
   end
 
   it "returns nil for notifications" do
