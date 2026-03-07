@@ -98,6 +98,17 @@ module Arcana
         },
       },
       {
+        name:        "arcana_unregister",
+        description: "Unregister from the Arcana bus. Removes your mailbox and directory listing. Messages in flight are lost.",
+        inputSchema: {
+          type:       "object",
+          properties: {
+            address: {type: "string", description: "The address to unregister"},
+          },
+          required: ["address"],
+        },
+      },
+      {
         name:        "arcana_health",
         description: "Check the health of the Arcana server.",
         inputSchema: {
@@ -182,6 +193,8 @@ module Arcana
         call_publish(args)
       when "arcana_register"
         call_register(args)
+      when "arcana_unregister"
+        call_unregister(args)
       when "arcana_receive"
         call_receive(args)
       when "arcana_health"
@@ -248,6 +261,13 @@ module Arcana
         tags:        args["tags"]?,
       }.to_json
       http_post("/register", body)
+    end
+
+    private def call_unregister(args : JSON::Any) : String
+      body = {
+        address: args["address"]?.try(&.as_s?) || "",
+      }.to_json
+      http_post("/unregister", body)
     end
 
     private def call_receive(args : JSON::Any) : String

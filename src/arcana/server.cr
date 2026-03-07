@@ -90,6 +90,9 @@ module Arcana
       when {"POST", "/register"}
         handle_post_register(ctx)
 
+      when {"POST", "/unregister"}
+        handle_post_unregister(ctx)
+
       when {"POST", "/receive"}
         handle_post_receive(ctx)
 
@@ -128,6 +131,20 @@ module Arcana
           tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
         ))
       end
+
+      ctx.response.print %({"ok":true,"address":"#{address}"})
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    private def handle_post_unregister(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed["address"]?.try(&.as_s?) || ""
+      raise "address required" if address.empty?
+
+      @directory.unregister(address)
+      @bus.remove_mailbox(address)
 
       ctx.response.print %({"ok":true,"address":"#{address}"})
     rescue ex
