@@ -54,6 +54,26 @@ module Arcana
         result
       end
 
+      def complete(request : Request, ctx : Context) : Response
+        raise CancelledError.new if ctx.cancelled?
+
+        model = request.model.empty? ? @model : request.model
+        payload = build_payload(request, model)
+        emit_request_trace(request, model, payload)
+
+        response = post_api_cancellable(payload, ctx)
+
+        emit_response_trace(request, response)
+
+        unless response.success?
+          raise APIError.new(response.status_code, response.body, "openai:chat")
+        end
+
+        result = Response.from_openai_json(response.body, provider: "openai")
+        result.raw_request = payload
+        result
+      end
+
       private def build_payload(request : Request, model : String) : String
         JSON.build do |json|
           json.object do
@@ -85,6 +105,43 @@ module Arcana
         client.connect_timeout = 30.seconds
         client.read_timeout = 120.seconds
         client.post(uri.request_target, headers: headers, body: payload)
+      end
+
+      private def post_api_cancellable(payload : String, ctx : Context) : HTTP::Client::Response
+        headers = Util.bearer_headers(@api_key)
+        uri = URI.parse(@endpoint)
+        client = HTTP::Client.new(uri)
+        client.connect_timeout = 30.seconds
+        client.read_timeout = 120.seconds
+
+        result = Channel(HTTP::Client::Response | Exception).new(1)
+
+        spawn do
+          begin
+            resp = client.post(uri.request_target, headers: headers, body: payload)
+            result.send(resp)
+          rescue ex
+            result.send(ex)
+          end
+        end
+
+        spawn do
+          until ctx.cancelled?
+            sleep 100.milliseconds
+          end
+          client.close rescue nil
+          result.send(CancelledError.new) rescue nil
+        end
+
+        outcome = result.receive
+        case outcome
+        when Exception
+          raise outcome
+        when HTTP::Client::Response
+          outcome
+        else
+          raise CancelledError.new
+        end
       end
 
       private def emit_request_trace(request : Request, model : String, payload : String) : Nil

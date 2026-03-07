@@ -77,6 +77,43 @@ module Arcana
         parse_response(response.body, payload)
       end
 
+      def complete(request : Request, ctx : Context) : Response
+        raise CancelledError.new if ctx.cancelled?
+
+        model = request.model.empty? ? @model : request.model
+        max_tokens = request.max_tokens > 0 ? request.max_tokens : @max_tokens
+        payload = build_payload(request, model, max_tokens)
+
+        tags = request.trace_tags || {} of String => String
+        emit_trace({
+          phase:      "api_request_chat",
+          event_type: "api_request",
+          provider:   "anthropic",
+          endpoint:   @endpoint,
+          model:      model,
+          tags:       tags.to_json,
+        })
+
+        response = post_api_cancellable(payload, ctx)
+
+        emit_trace({
+          phase:          "api_response_chat",
+          event_type:     "api_response",
+          provider:       "anthropic",
+          endpoint:       @endpoint,
+          status_code:    response.status_code,
+          content_type:   response.headers["Content-Type"]? || "",
+          content_length: response.headers["Content-Length"]? || "",
+          tags:           tags.to_json,
+        })
+
+        unless response.success?
+          raise APIError.new(response.status_code, response.body, "anthropic:chat")
+        end
+
+        parse_response(response.body, payload)
+      end
+
       private def build_payload(request : Request, model : String, max_tokens : Int32) : String
         JSON.build do |json|
           json.object do
@@ -195,6 +232,47 @@ module Arcana
         client.connect_timeout = 30.seconds
         client.read_timeout = 120.seconds
         client.post(uri.request_target, headers: headers, body: payload)
+      end
+
+      private def post_api_cancellable(payload : String, ctx : Context) : HTTP::Client::Response
+        headers = HTTP::Headers{
+          "x-api-key"         => @api_key,
+          "anthropic-version" => API_VERSION,
+          "Content-Type"      => "application/json",
+        }
+        uri = URI.parse(@endpoint)
+        client = HTTP::Client.new(uri)
+        client.connect_timeout = 30.seconds
+        client.read_timeout = 120.seconds
+
+        result = Channel(HTTP::Client::Response | Exception).new(1)
+
+        spawn do
+          begin
+            resp = client.post(uri.request_target, headers: headers, body: payload)
+            result.send(resp)
+          rescue ex
+            result.send(ex)
+          end
+        end
+
+        spawn do
+          until ctx.cancelled?
+            sleep 100.milliseconds
+          end
+          client.close rescue nil
+          result.send(CancelledError.new) rescue nil
+        end
+
+        outcome = result.receive
+        case outcome
+        when Exception
+          raise outcome
+        when HTTP::Client::Response
+          outcome
+        else
+          raise CancelledError.new
+        end
       end
 
       private def parse_response(body : String, payload : String) : Response

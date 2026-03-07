@@ -2,6 +2,7 @@ require "json"
 
 require "./arcana/trace"
 require "./arcana/error"
+require "./arcana/context"
 require "./arcana/util/hash"
 require "./arcana/util/http"
 require "./arcana/util/multipart"
