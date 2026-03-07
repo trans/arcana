@@ -1,6 +1,6 @@
 require "../src/arcana"
 
-host = ENV["ARCANA_HOST"]? || "0.0.0.0"
+host = ENV["ARCANA_HOST"]? || "127.0.0.1"
 port = (ENV["ARCANA_PORT"]? || "4000").to_i
 
 bus = Arcana::Bus.new
@@ -176,11 +176,248 @@ registry_svc = Arcana::Service.new(
 end
 registry_svc.start
 
+# -- Provider-backed services (only registered when API keys are present) --
+
+services = ["echo", "registry"]
+
+if openai_key = ENV["OPENAI_API_KEY"]?
+  chat_openai = Arcana::Chat::OpenAI.new(api_key: openai_key)
+  chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150)"}},"required":["messages"]}))
+
+  chat_openai_svc = Arcana::Service.new(
+    bus: bus, directory: dir,
+    address: "chat:openai",
+    name: "OpenAI Chat",
+    description: "Chat completion via OpenAI-compatible API.",
+    schema: chat_openai_schema,
+    guide: <<-GUIDE,
+    Send a messages array to get a chat completion.
+
+    Example request:
+      {"messages": [{"role": "user", "content": "Hello!"}]}
+
+    Optional fields:
+      model: "gpt-4o", "gpt-4o-mini" (default), etc.
+      temperature: 0.0-2.0 (default 0.7)
+      max_tokens: response limit (default 150)
+
+    Returns: {"content": "...", "model": "...", "finish_reason": "...",
+              "prompt_tokens": N, "completion_tokens": N}
+    GUIDE
+    tags: ["chat", "llm", "openai"],
+  ) do |data|
+    msgs = data["messages"].as_a.map do |m|
+      Arcana::Chat::Message.new(
+        role: m["role"].as_s,
+        content: m["content"]?.try(&.as_s?),
+      )
+    end
+    request = Arcana::Chat::Request.new(
+      messages: msgs,
+      model: data["model"]?.try(&.as_s?) || "",
+      temperature: data["temperature"]?.try(&.as_f?) || 0.7,
+      max_tokens: data["max_tokens"]?.try(&.as_i?) || 150,
+    )
+    response = chat_openai.complete(request)
+    JSON::Any.new({
+      "content"           => JSON::Any.new(response.content || ""),
+      "model"             => JSON::Any.new(response.model),
+      "finish_reason"     => JSON::Any.new(response.finish_reason || ""),
+      "prompt_tokens"     => JSON::Any.new(response.prompt_tokens || 0),
+      "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
+    })
+  end
+  chat_openai_svc.start
+  services << "chat:openai"
+
+  # Embed service
+  embed_openai = Arcana::Embed::OpenAI.new(api_key: openai_key)
+  embed_schema = JSON.parse(%({"type":"object","properties":{"texts":{"type":"array","items":{"type":"string"},"description":"Texts to embed"},"model":{"type":"string","description":"Model (default: text-embedding-3-small)"}},"required":["texts"]}))
+
+  embed_svc = Arcana::Service.new(
+    bus: bus, directory: dir,
+    address: "embed:openai",
+    name: "OpenAI Embeddings",
+    description: "Generate text embeddings via OpenAI.",
+    schema: embed_schema,
+    guide: <<-GUIDE,
+    Send an array of texts to get embedding vectors.
+
+    Example: {"texts": ["Hello world", "Goodbye"]}
+
+    Returns: {"embeddings": [[0.1, ...], [0.2, ...]], "dimensions": 1536,
+              "total_tokens": N}
+    GUIDE
+    tags: ["embed", "openai", "vectors"],
+  ) do |data|
+    texts = data["texts"].as_a.map(&.as_s)
+    request = Arcana::Embed::Request.new(
+      texts: texts,
+      model: data["model"]?.try(&.as_s?) || "",
+    )
+    result = embed_openai.embed(request)
+    JSON::Any.new({
+      "embeddings"   => JSON::Any.new(result.embeddings.map { |e| JSON::Any.new(e.map { |v| JSON::Any.new(v) }) }),
+      "dimensions"   => JSON::Any.new(result.dimensions),
+      "total_tokens" => JSON::Any.new(result.total_tokens),
+    })
+  end
+  embed_svc.start
+  services << "embed:openai"
+
+  # TTS service
+  tts_openai = Arcana::TTS::OpenAI.new(api_key: openai_key)
+  tts_schema = JSON.parse(%({"type":"object","properties":{"text":{"type":"string","description":"Text to synthesize"},"voice":{"type":"string","description":"Voice: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse (default: alloy)"},"output_path":{"type":"string","description":"File path for output audio"},"format":{"type":"string","description":"Audio format: mp3, wav, aac, flac, opus, pcm (default: opus)"},"instructions":{"type":"string","description":"Style/persona instructions"},"speed":{"type":"number","description":"Speed 0.25-4.0 (default: 1.0)"}},"required":["text","output_path"]}))
+
+  tts_svc = Arcana::Service.new(
+    bus: bus, directory: dir,
+    address: "tts:openai",
+    name: "OpenAI Text-to-Speech",
+    description: "Synthesize speech from text via OpenAI.",
+    schema: tts_schema,
+    guide: <<-GUIDE,
+    Send text and an output path to generate speech audio.
+
+    Example: {"text": "Hello world", "output_path": "/tmp/hello.opus"}
+
+    Optional fields:
+      voice: alloy (default), nova, echo, etc.
+      format: opus (default), mp3, wav, aac, flac, pcm
+      instructions: "Speak warmly and clearly"
+      speed: 0.25-4.0
+
+    Returns: {"output_path": "/tmp/hello.opus", "model": "...",
+              "content_type": "audio/opus", "content_length": N}
+    GUIDE
+    tags: ["tts", "speech", "audio", "openai"],
+  ) do |data|
+    request = Arcana::TTS::Request.new(
+      text: data["text"].as_s,
+      voice: data["voice"]?.try(&.as_s?) || "alloy",
+      response_format: data["format"]?.try(&.as_s?) || "opus",
+      instructions: data["instructions"]?.try(&.as_s?),
+      speed: data["speed"]?.try(&.as_f?),
+    )
+    result = tts_openai.synthesize(request, data["output_path"].as_s)
+    JSON::Any.new({
+      "output_path"    => JSON::Any.new(result.output_path),
+      "model"          => JSON::Any.new(result.model),
+      "content_type"   => JSON::Any.new(result.content_type),
+      "content_length" => JSON::Any.new(result.content_length),
+    })
+  end
+  tts_svc.start
+  services << "tts:openai"
+end
+
+if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
+  chat_anthropic = Arcana::Chat::Anthropic.new(api_key: anthropic_key)
+  chat_anthropic_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: claude-sonnet-4-20250514)"},"temperature":{"type":"number","description":"Sampling temperature (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"}},"required":["messages"]}))
+
+  chat_anthropic_svc = Arcana::Service.new(
+    bus: bus, directory: dir,
+    address: "chat:anthropic",
+    name: "Anthropic Chat",
+    description: "Chat completion via Anthropic Messages API.",
+    schema: chat_anthropic_schema,
+    guide: <<-GUIDE,
+    Send a messages array to get a chat completion from Claude.
+
+    Example request:
+      {"messages": [{"role": "user", "content": "Hello!"}]}
+
+    Optional fields:
+      model: "claude-sonnet-4-20250514" (default), "claude-opus-4-20250514", etc.
+      temperature: 0.0-1.0 (default 0.7)
+      max_tokens: response limit (default 4096)
+
+    System messages are extracted and sent as top-level system parameter.
+
+    Returns: {"content": "...", "model": "...", "finish_reason": "...",
+              "prompt_tokens": N, "completion_tokens": N}
+    GUIDE
+    tags: ["chat", "llm", "anthropic", "claude"],
+  ) do |data|
+    msgs = data["messages"].as_a.map do |m|
+      Arcana::Chat::Message.new(
+        role: m["role"].as_s,
+        content: m["content"]?.try(&.as_s?),
+      )
+    end
+    request = Arcana::Chat::Request.new(
+      messages: msgs,
+      model: data["model"]?.try(&.as_s?) || "",
+      temperature: data["temperature"]?.try(&.as_f?) || 0.7,
+      max_tokens: data["max_tokens"]?.try(&.as_i?) || 4096,
+    )
+    response = chat_anthropic.complete(request)
+    JSON::Any.new({
+      "content"           => JSON::Any.new(response.content || ""),
+      "model"             => JSON::Any.new(response.model),
+      "finish_reason"     => JSON::Any.new(response.finish_reason || ""),
+      "prompt_tokens"     => JSON::Any.new(response.prompt_tokens || 0),
+      "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
+    })
+  end
+  chat_anthropic_svc.start
+  services << "chat:anthropic"
+end
+
+if runware_key = ENV["RUNWARE_API_KEY"]?
+  image_runware = Arcana::Image::Runware.new(api_key: runware_key)
+  image_schema = JSON.parse(%({"type":"object","properties":{"prompt":{"type":"string","description":"Image description"},"output_path":{"type":"string","description":"File path for output image"},"width":{"type":"integer","description":"Width in pixels (default: 1024, auto-snapped to FLUX sizes)"},"height":{"type":"integer","description":"Height in pixels (default: 1024)"},"format":{"type":"string","description":"Output format: WEBP (default), PNG"},"enhance_prompt":{"type":"boolean","description":"Let provider rewrite prompt (default: false)"}},"required":["prompt","output_path"]}))
+
+  image_svc = Arcana::Service.new(
+    bus: bus, directory: dir,
+    address: "image:runware",
+    name: "Runware Image Generator",
+    description: "Generate images using FLUX models via Runware.",
+    schema: image_schema,
+    guide: <<-GUIDE,
+    Send a prompt and output path to generate an image.
+
+    Example: {"prompt": "a crystal shard glowing", "output_path": "/tmp/shard.webp"}
+
+    Optional fields:
+      width/height: default 1024x1024, auto-snapped to FLUX-compatible sizes
+      format: WEBP (default) or PNG
+      enhance_prompt: true to let the model rewrite your prompt
+
+    Returns: {"output_path": "/tmp/shard.webp", "model": "...", "cost": 0.003}
+
+    Tips:
+    - Short, descriptive prompts work best
+    - Dimensions are automatically adjusted to valid FLUX aspect ratios
+    - Cost per generation is reported in the response
+    GUIDE
+    tags: ["image", "runware", "flux", "generation"],
+  ) do |data|
+    request = Arcana::Image::Request.new(
+      prompt: data["prompt"].as_s,
+      width: data["width"]?.try(&.as_i?) || 1024,
+      height: data["height"]?.try(&.as_i?) || 1024,
+      output_format: data["format"]?.try(&.as_s?) || "WEBP",
+      enhance_prompt: data["enhance_prompt"]?.try(&.as_bool?) || false,
+    )
+    result = image_runware.generate(request, data["output_path"].as_s)
+    h = {
+      "output_path" => JSON::Any.new(result.output_path),
+      "model"       => JSON::Any.new(result.model),
+    } of String => JSON::Any
+    if cost = result.cost
+      h["cost"] = JSON::Any.new(cost)
+    end
+    JSON::Any.new(h)
+  end
+  image_svc.start
+  services << "image:runware"
+end
+
 STDERR.puts "Arcana v#{Arcana::VERSION} starting on #{host}:#{port}"
 STDERR.puts "  WebSocket: ws://#{host}:#{port}/bus"
 STDERR.puts "  REST:      http://#{host}:#{port}/directory"
 STDERR.puts "  Health:    http://#{host}:#{port}/health"
-STDERR.puts "  Services:  echo, registry"
+STDERR.puts "  Services:  #{services.join(", ")}"
 STDERR.puts "  Directory: #{dir.list.size} listings"
 
 server = Arcana::Server.new(bus, dir, host: host, port: port)
