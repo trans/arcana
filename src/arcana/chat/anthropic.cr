@@ -114,11 +114,173 @@ module Arcana
         parse_response(response.body, payload)
       end
 
-      private def build_payload(request : Request, model : String, max_tokens : Int32) : String
+      def stream(request : Request, ctx : Context? = nil, &block : StreamEvent ->) : Response
+        raise CancelledError.new if ctx.try(&.cancelled?)
+
+        model = request.model.empty? ? @model : request.model
+        max_tokens = request.max_tokens > 0 ? request.max_tokens : @max_tokens
+        payload = build_payload(request, model, max_tokens, stream: true)
+
+        headers = HTTP::Headers{
+          "x-api-key"         => @api_key,
+          "anthropic-version" => API_VERSION,
+          "Content-Type"      => "application/json",
+        }
+        uri = URI.parse(@endpoint)
+        client = HTTP::Client.new(uri)
+        client.connect_timeout = 30.seconds
+        client.read_timeout = 120.seconds
+
+        # Cancel watcher
+        if c = ctx
+          spawn do
+            until c.cancelled?
+              sleep 100.milliseconds
+            end
+            client.close rescue nil
+          end
+        end
+
+        content = String::Builder.new
+        tool_calls = [] of ToolCall
+        server_tool_results = [] of JSON::Any
+        current_tool_id = ""
+        current_tool_name = ""
+        current_tool_input = String::Builder.new
+        in_tool = false
+        response_model = ""
+        finish_reason = ""
+        prompt_tokens = 0
+        completion_tokens = 0
+        cache_read_tokens : Int32? = nil
+        cache_creation_tokens : Int32? = nil
+
+        begin
+          client.post(uri.request_target, headers: headers, body: payload) do |response|
+            unless response.success?
+              body = response.body_io.gets_to_end
+              raise APIError.new(response.status_code, body, "anthropic:chat:stream")
+            end
+
+            event_type = ""
+            response.body_io.each_line do |line|
+              raise CancelledError.new if ctx.try(&.cancelled?)
+
+              if line.starts_with?("event: ")
+                event_type = line[7..]
+              elsif line.starts_with?("data: ")
+                data = line[6..]
+                next if data == "[DONE]"
+
+                parsed = JSON.parse(data) rescue next
+
+                case event_type
+                when "message_start"
+                  if msg = parsed["message"]?
+                    response_model = msg["model"]?.try(&.as_s?) || ""
+                    if usage = msg["usage"]?
+                      prompt_tokens = usage["input_tokens"]?.try(&.as_i?) || 0
+                      cache_read_tokens = usage["cache_read_input_tokens"]?.try(&.as_i?)
+                      cache_creation_tokens = usage["cache_creation_input_tokens"]?.try(&.as_i?)
+                    end
+                  end
+
+                when "content_block_start"
+                  if cb = parsed["content_block"]?
+                    case cb["type"]?.try(&.as_s?)
+                    when "tool_use"
+                      in_tool = true
+                      current_tool_id = cb["id"]?.try(&.as_s?) || ""
+                      current_tool_name = cb["name"]?.try(&.as_s?) || ""
+                      current_tool_input = String::Builder.new
+                    when "server_tool_use"
+                      server_tool_results << cb
+                    end
+                  end
+
+                when "content_block_delta"
+                  if delta = parsed["delta"]?
+                    case delta["type"]?.try(&.as_s?)
+                    when "text_delta"
+                      text = delta["text"]?.try(&.as_s?) || ""
+                      content << text
+                      block.call(StreamEvent.text_delta(text))
+                    when "input_json_delta"
+                      partial = delta["partial_json"]?.try(&.as_s?) || ""
+                      current_tool_input << partial
+                    end
+                  end
+
+                when "content_block_stop"
+                  if in_tool
+                    tc = ToolCall.new(
+                      id: current_tool_id,
+                      type: "function",
+                      function: ToolCall::FunctionCall.new(
+                        name: current_tool_name,
+                        arguments: current_tool_input.to_s.empty? ? "{}" : current_tool_input.to_s,
+                      ),
+                    )
+                    tool_calls << tc
+                    block.call(StreamEvent.tool_use(tc))
+                    in_tool = false
+                  end
+                  # Check if prev block was server tool result
+                  if cb = parsed["content_block"]?
+                    if cb["type"]?.try(&.as_s?) == "web_search_tool_result"
+                      server_tool_results << cb
+                    end
+                  end
+
+                when "message_delta"
+                  if delta = parsed["delta"]?
+                    stop_reason = delta["stop_reason"]?.try(&.as_s?)
+                    finish_reason = case stop_reason
+                                    when "end_turn"   then "stop"
+                                    when "tool_use"   then "tool_calls"
+                                    when "max_tokens" then "length"
+                                    else                   stop_reason || ""
+                                    end
+                  end
+                  if usage = parsed["usage"]?
+                    completion_tokens = usage["output_tokens"]?.try(&.as_i?) || 0
+                  end
+                end
+              end
+            end
+          end
+        rescue ex : CancelledError
+          raise ex
+        rescue ex : IO::Error
+          raise CancelledError.new if ctx.try(&.cancelled?)
+          raise ex
+        end
+
+        final = Response.new(
+          content: content.to_s.empty? ? nil : content.to_s,
+          tool_calls: tool_calls,
+          finish_reason: finish_reason,
+          model: response_model,
+          provider: "anthropic",
+          raw_request: payload,
+          raw_json: "",
+          prompt_tokens: prompt_tokens,
+          completion_tokens: completion_tokens,
+          cache_read_tokens: cache_read_tokens,
+          cache_creation_tokens: cache_creation_tokens,
+          server_tool_results: server_tool_results,
+        )
+
+        block.call(StreamEvent.done(final))
+        final
+      end
+
+      private def build_payload(request : Request, model : String, max_tokens : Int32, stream : Bool = false) : String
         JSON.build do |json|
           json.object do
             json.field "model", model
             json.field "max_tokens", max_tokens
+            json.field "stream", true if stream
 
             # Anthropic takes system as a top-level string, not in messages.
             system_msg = request.messages.find { |m| m.role == "system" }

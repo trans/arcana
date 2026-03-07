@@ -12,6 +12,12 @@ module Arcana
         complete(request)
       end
 
+      # Stream a chat completion, yielding events as they arrive.
+      # Override in subclasses that support streaming.
+      def stream(request : Request, ctx : Context? = nil, &block : StreamEvent ->) : Response
+        raise Error.new("Streaming not supported by #{name} provider")
+      end
+
       # List available models. Override in subclasses that support it.
       def models : Array(String)
         [] of String
