@@ -1,3 +1,6 @@
 require "./bus/envelope"
 require "./bus/mailbox"
 require "./bus/bus"
+require "./bus/directory"
+require "./bus/protocol"
+require "./bus/service"
