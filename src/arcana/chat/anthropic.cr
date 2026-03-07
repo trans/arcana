@@ -1,0 +1,221 @@
+require "http/client"
+require "json"
+
+module Arcana
+  module Chat
+    class Anthropic < Provider
+      ENDPOINT        = "https://api.anthropic.com/v1/messages"
+      API_VERSION     = "2023-06-01"
+      DEFAULT_MODEL   = "claude-sonnet-4-20250514"
+      MAX_TOKENS_DEFAULT = 4096
+
+      getter model : String
+
+      def initialize(
+        @api_key : String,
+        @model : String = DEFAULT_MODEL,
+        @max_tokens : Int32 = MAX_TOKENS_DEFAULT,
+        @endpoint : String = ENDPOINT,
+        trace : Proc(String, Nil)? = nil,
+      )
+        raise ConfigError.new("API key is required for Anthropic Chat") if @api_key.strip.empty?
+        @trace = trace
+      end
+
+      def name : String
+        "anthropic"
+      end
+
+      def complete(request : Request) : Response
+        model = request.model.empty? ? @model : request.model
+        max_tokens = request.max_tokens > 0 ? request.max_tokens : @max_tokens
+        payload = build_payload(request, model, max_tokens)
+
+        tags = request.trace_tags || {} of String => String
+        emit_trace({
+          phase:      "api_request_chat",
+          event_type: "api_request",
+          provider:   "anthropic",
+          endpoint:   @endpoint,
+          model:      model,
+          tags:       tags.to_json,
+        })
+
+        response = post_api(payload)
+
+        emit_trace({
+          phase:          "api_response_chat",
+          event_type:     "api_response",
+          provider:       "anthropic",
+          endpoint:       @endpoint,
+          status_code:    response.status_code,
+          content_type:   response.headers["Content-Type"]? || "",
+          content_length: response.headers["Content-Length"]? || "",
+          tags:           tags.to_json,
+        })
+
+        unless response.success?
+          raise APIError.new(response.status_code, response.body, "anthropic:chat")
+        end
+
+        parse_response(response.body, payload)
+      end
+
+      private def build_payload(request : Request, model : String, max_tokens : Int32) : String
+        JSON.build do |json|
+          json.object do
+            json.field "model", model
+            json.field "max_tokens", max_tokens
+
+            # Anthropic takes system as a top-level string, not in messages.
+            system_msg = request.messages.find { |m| m.role == "system" }
+            if system_msg && (sys_content = system_msg.content)
+              json.field "system", sys_content
+            end
+
+            json.field "messages" do
+              json.array do
+                request.messages.each do |msg|
+                  next if msg.role == "system"
+                  build_message(json, msg)
+                end
+              end
+            end
+
+            if request.temperature != 0.7 # only send if non-default
+              json.field "temperature", request.temperature
+            end
+
+            if tools = request.tools
+              json.field "tools" do
+                json.array do
+                  tools.each do |tool|
+                    json.object do
+                      json.field "name", tool.name
+                      json.field "description", tool.description
+                      json.field "input_schema", JSON.parse(tool.parameters_json)
+                    end
+                  end
+                end
+              end
+
+              if tc = request.tool_choice
+                case tc
+                when "auto"     then json.field "tool_choice", JSON.parse(%({"type":"auto"}))
+                when "required" then json.field "tool_choice", JSON.parse(%({"type":"any"}))
+                when "none"     then # omit — Anthropic has no "none", just don't send tools
+                else
+                  json.field "tool_choice", JSON.parse(%({"type":"tool","name":"#{tc}"}))
+                end
+              end
+            end
+          end
+        end
+      end
+
+      private def build_message(json : JSON::Builder, msg : Message) : Nil
+        json.object do
+          json.field "role", msg.role == "tool" ? "user" : msg.role
+
+          if msg.tool_call_id
+            # Tool result — Anthropic uses content blocks
+            json.field "content" do
+              json.array do
+                json.object do
+                  json.field "type", "tool_result"
+                  json.field "tool_use_id", msg.tool_call_id
+                  json.field "content", msg.content || ""
+                end
+              end
+            end
+          elsif tc = msg.tool_calls
+            # Assistant message with tool use
+            json.field "content" do
+              json.array do
+                if c = msg.content
+                  json.object do
+                    json.field "type", "text"
+                    json.field "text", c
+                  end
+                end
+                tc.each do |tool_call|
+                  json.object do
+                    json.field "type", "tool_use"
+                    json.field "id", tool_call.id
+                    json.field "name", tool_call.function.name
+                    json.field "input", JSON.parse(tool_call.function.arguments)
+                  end
+                end
+              end
+            end
+          else
+            json.field "content", msg.content || ""
+          end
+        end
+      end
+
+      private def post_api(payload : String) : HTTP::Client::Response
+        headers = HTTP::Headers{
+          "x-api-key"         => @api_key,
+          "anthropic-version" => API_VERSION,
+          "Content-Type"      => "application/json",
+        }
+        uri = URI.parse(@endpoint)
+        client = HTTP::Client.new(uri)
+        client.connect_timeout = 30.seconds
+        client.read_timeout = 120.seconds
+        client.post(uri.request_target, headers: headers, body: payload)
+      end
+
+      private def parse_response(body : String, payload : String) : Response
+        parsed = JSON.parse(body)
+
+        content = nil
+        tool_calls = [] of ToolCall
+
+        if blocks = parsed["content"]?.try(&.as_a?)
+          blocks.each do |block|
+            case block["type"]?.try(&.as_s?)
+            when "text"
+              content = block["text"]?.try(&.as_s?)
+            when "tool_use"
+              tool_calls << ToolCall.new(
+                id: block["id"]?.try(&.as_s?) || "",
+                type: "function",
+                function: ToolCall::FunctionCall.new(
+                  name: block["name"]?.try(&.as_s?) || "",
+                  arguments: (block["input"]? || JSON::Any.new({} of String => JSON::Any)).to_json,
+                ),
+              )
+            end
+          end
+        end
+
+        stop_reason = parsed["stop_reason"]?.try(&.as_s?)
+        finish_reason = case stop_reason
+                        when "end_turn"  then "stop"
+                        when "tool_use"  then "tool_calls"
+                        when "max_tokens" then "length"
+                        else                  stop_reason
+                        end
+
+        model = parsed["model"]?.try(&.as_s?) || ""
+        usage = parsed["usage"]?
+        prompt_tokens = usage.try { |u| u["input_tokens"]?.try(&.as_i?) }
+        completion_tokens = usage.try { |u| u["output_tokens"]?.try(&.as_i?) }
+
+        Response.new(
+          content: content,
+          tool_calls: tool_calls,
+          finish_reason: finish_reason,
+          model: model,
+          provider: "anthropic",
+          raw_request: payload,
+          raw_json: body,
+          prompt_tokens: prompt_tokens,
+          completion_tokens: completion_tokens,
+        )
+      end
+    end
+  end
+end

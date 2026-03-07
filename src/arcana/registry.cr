@@ -112,6 +112,15 @@ Arcana::Registry.register_chat("openai") do |config|
   ).as(Arcana::Chat::Provider)
 end
 
+Arcana::Registry.register_chat("anthropic") do |config|
+  Arcana::Chat::Anthropic.new(
+    api_key: Arcana::Registry.str(config, "api_key"),
+    model: Arcana::Registry.str(config, "model", Arcana::Chat::Anthropic::DEFAULT_MODEL),
+    max_tokens: Arcana::Registry.int(config, "max_tokens", Arcana::Chat::Anthropic::MAX_TOKENS_DEFAULT),
+    endpoint: Arcana::Registry.str(config, "endpoint", Arcana::Chat::Anthropic::ENDPOINT),
+  ).as(Arcana::Chat::Provider)
+end
+
 Arcana::Registry.register_image("openai") do |config|
   Arcana::Image::OpenAI.new(
     api_key: Arcana::Registry.str(config, "api_key"),
