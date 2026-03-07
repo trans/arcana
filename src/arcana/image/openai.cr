@@ -40,17 +40,18 @@ module Arcana
         size = "#{request.width}x#{request.height}"
         tags = request.trace_tags || {} of String => String
 
-        if use_edit
+        raw_req, raw_resp = if use_edit
           request_image_edit(request, size, output_path, tags)
         else
           request_image(request, size, output_path, tags)
         end
 
-        Result.new(output_path, @model, "openai")
+        Result.new(output_path, @model, "openai",
+          raw_request: raw_req, raw_response: raw_resp)
       end
 
       private def request_image(request : Request, size : String, output_path : String,
-                                tags : Hash(String, String)) : Nil
+                                tags : Hash(String, String)) : {String, String}
         payload = {
           model:   @model,
           prompt:  request.prompt,
@@ -59,30 +60,8 @@ module Arcana
           quality: @quality,
         }.to_json
 
-        emit_trace({
-          phase:      "api_request_image",
-          event_type: "api_request",
-          provider:   "openai",
-          endpoint:   GENERATIONS_ENDPOINT,
-          model:      @model,
-          quality:    @quality,
-          size:       size,
-          tags:       tags.to_json,
-        })
-
         headers = Util.bearer_headers(@api_key)
         response = HTTP::Client.post(GENERATIONS_ENDPOINT, headers: headers, body: payload)
-
-        emit_trace({
-          phase:          "api_response_image",
-          event_type:     "api_response",
-          provider:       "openai",
-          endpoint:       GENERATIONS_ENDPOINT,
-          status_code:    response.status_code,
-          content_type:   response.headers["Content-Type"]? || "",
-          content_length: response.headers["Content-Length"]? || "",
-          tags:           tags.to_json,
-        })
 
         unless response.success?
           raise APIError.new(response.status_code, response.body, "openai")
@@ -91,22 +70,15 @@ module Arcana
         parsed = JSON.parse(response.body)
         b64_data = parsed["data"][0]["b64_json"].as_s
         File.write(output_path, Base64.decode(b64_data))
+
+        # Strip b64 data from response log (huge) — keep metadata only
+        resp_summary = {status: response.status_code, model: @model, size: size}.to_json
+        {payload, resp_summary}
       end
 
       private def request_image_edit(request : Request, size : String, output_path : String,
-                                     tags : Hash(String, String)) : Nil
+                                     tags : Hash(String, String)) : {String, String}
         id = request.identity.not_nil!
-
-        emit_trace({
-          phase:      "api_request_image_edit",
-          event_type: "api_request",
-          provider:   "openai",
-          endpoint:   EDITS_ENDPOINT,
-          model:      @model,
-          quality:    @quality,
-          size:       size,
-          tags:       tags.to_json,
-        })
 
         ref_mime = Util.mime_for(id.reference_path)
         ref_ext = File.extname(id.reference_path).lchop('.')
@@ -126,17 +98,6 @@ module Arcana
 
         response = HTTP::Client.post(EDITS_ENDPOINT, headers: headers, body: mp.to_s)
 
-        emit_trace({
-          phase:          "api_response_image_edit",
-          event_type:     "api_response",
-          provider:       "openai",
-          endpoint:       EDITS_ENDPOINT,
-          status_code:    response.status_code,
-          content_type:   response.headers["Content-Type"]? || "",
-          content_length: response.headers["Content-Length"]? || "",
-          tags:           tags.to_json,
-        })
-
         unless response.success?
           raise APIError.new(response.status_code, response.body, "openai")
         end
@@ -144,6 +105,12 @@ module Arcana
         parsed = JSON.parse(response.body)
         b64_data = parsed["data"][0]["b64_json"].as_s
         File.write(output_path, Base64.decode(b64_data))
+
+        # Log multipart fields (not binary data) as the request
+        req_summary = {endpoint: EDITS_ENDPOINT, model: @model, prompt: request.prompt, size: size,
+                       quality: @quality, reference: id.reference_path}.to_json
+        resp_summary = {status: response.status_code, model: @model, size: size}.to_json
+        {req_summary, resp_summary}
       end
     end
   end

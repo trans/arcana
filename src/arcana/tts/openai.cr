@@ -40,7 +40,11 @@ module Arcana
           file.write(response.body.to_slice)
         end
 
-        Result.new(output_path, model, "openai")
+        Result.new(output_path, model, "openai",
+          raw_request: payload,
+          status_code: response.status_code,
+          content_type: response.headers["Content-Type"]? || "",
+          content_length: response.body.bytesize.to_i64)
       end
 
       private def build_payload(request : Request, model : String) : String

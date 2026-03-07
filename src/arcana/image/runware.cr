@@ -71,7 +71,8 @@ module Arcana
         cost = data[0]["cost"]?.try(&.as_f?)
 
         Util.download_file(image_url, output_path)
-        Result.new(output_path, effective_model(request), "runware", cost)
+        Result.new(output_path, effective_model(request), "runware", cost,
+          raw_request: payload, raw_response: response.body)
       end
 
       # Upload an image to Runware, returns a reusable UUID.

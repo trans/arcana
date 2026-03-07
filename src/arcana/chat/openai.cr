@@ -36,7 +36,9 @@ module Arcana
           raise APIError.new(response.status_code, response.body, "openai:chat")
         end
 
-        Response.from_openai_json(response.body, provider: "openai")
+        result = Response.from_openai_json(response.body, provider: "openai")
+        result.raw_request = payload
+        result
       end
 
       private def build_payload(request : Request, model : String) : String

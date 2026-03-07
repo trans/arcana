@@ -8,7 +8,8 @@ module Arcana
       property finish_reason : String?
       property model : String
       property provider : String
-      property raw_json : String  # full response body for debugging
+      property raw_request : String  # full request body sent to API
+      property raw_json : String     # full response body from API
 
       # Token usage from the API response.
       property prompt_tokens : Int32?
@@ -20,6 +21,7 @@ module Arcana
         @finish_reason : String? = nil,
         @model : String = "",
         @provider : String = "",
+        @raw_request : String = "",
         @raw_json : String = "",
         @prompt_tokens : Int32? = nil,
         @completion_tokens : Int32? = nil,
