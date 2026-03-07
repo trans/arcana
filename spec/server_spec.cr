@@ -59,4 +59,55 @@ describe Arcana::Server do
       server.stop
     end
   end
+
+  it "handles POST /send and /request" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+
+    # Start an echo service
+    svc = Arcana::Service.new(
+      bus: bus, directory: dir,
+      address: "echo",
+      name: "Echo",
+      description: "Echoes payload back",
+    ) { |data| data }
+    svc.start
+
+    server = Arcana::Server.new(bus, dir, port: 14001)
+    server.start_in_background
+
+    begin
+      headers = HTTP::Headers{"Content-Type" => "application/json"}
+
+      # POST /request — should get echo reply
+      body = {
+        from:    "test-client",
+        to:      "echo",
+        subject: "ping",
+        payload: {message: "hello"},
+      }.to_json
+
+      resp = HTTP::Client.post("http://127.0.0.1:14001/request", headers: headers, body: body)
+      resp.status_code.should eq(200)
+      result = JSON.parse(resp.body)
+      result["from"].as_s.should eq("echo")
+
+      # POST /send — fire and forget
+      body = {from: "test", to: "echo", payload: "fire"}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14001/send", headers: headers, body: body)
+      resp.status_code.should eq(200)
+
+      # POST /send to nonexistent address
+      body = {from: "test", to: "nobody", payload: "lost"}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14001/send", headers: headers, body: body)
+      resp.status_code.should eq(404)
+
+      # POST /request with timeout
+      body = {from: "test", to: "echo", payload: "fast", timeout_ms: 5000}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14001/request", headers: headers, body: body)
+      resp.status_code.should eq(200)
+    ensure
+      server.stop
+    end
+  end
 end

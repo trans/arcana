@@ -7,3 +7,9 @@ authors:
 crystal: '>= 1.19.1'
 
 license: MIT
+
+targets:
+  arcana:
+    main: bin/arcana.cr
+  arcana-mcp:
+    main: bin/arcana-mcp.cr

@@ -87,10 +87,74 @@ module Arcana
           ctx.response.print %({"error":"not found"})
         end
 
+      when {"POST", "/send"}
+        handle_post_send(ctx)
+
+      when {"POST", "/request"}
+        handle_post_request(ctx)
+
+      when {"POST", "/publish"}
+        handle_post_publish(ctx)
+
       else
-        ctx.response.status = HTTP::Status::METHOD_NOT_ALLOWED
-        ctx.response.print %({"error":"method not allowed"})
+        ctx.response.status = HTTP::Status::NOT_FOUND
+        ctx.response.print %({"error":"not found"})
       end
+    end
+
+    private def handle_post_send(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      envelope = envelope_from_json(parsed)
+      if @bus.send?(envelope)
+        ctx.response.print %({"ok":true})
+      else
+        ctx.response.status = HTTP::Status::NOT_FOUND
+        ctx.response.print %({"error":"no mailbox for address: #{envelope.to}"})
+      end
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    private def handle_post_request(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      envelope = envelope_from_json(parsed)
+      timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
+      timeout = timeout_ms.milliseconds
+
+      result = @bus.request(envelope, timeout: timeout)
+      if result
+        ctx.response.print result.to_json
+      else
+        ctx.response.status = HTTP::Status::GATEWAY_TIMEOUT
+        ctx.response.print %({"error":"timeout waiting for reply"})
+      end
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    private def handle_post_publish(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      topic = parsed["topic"]?.try(&.as_s?) || ""
+      envelope = envelope_from_json(parsed)
+      @bus.publish(topic, envelope)
+      ctx.response.print %({"ok":true})
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    private def envelope_from_json(parsed : JSON::Any) : Envelope
+      env = parsed["envelope"]? || parsed
+      Envelope.new(
+        from: env["from"]?.try(&.as_s?) || "",
+        to: env["to"]?.try(&.as_s?) || "",
+        subject: env["subject"]?.try(&.as_s?) || "",
+        payload: env["payload"]? || JSON::Any.new(nil),
+        correlation_id: env["correlation_id"]?.try(&.as_s?) || Random::Secure.hex(8),
+        reply_to: env["reply_to"]?.try(&.as_s?),
+      )
     end
 
     # WebSocket handler for /bus path.

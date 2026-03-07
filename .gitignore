@@ -1,6 +1,7 @@
 /docs/
 /lib/
-/bin/
+/bin/arcana
+/bin/arcana-mcp
 /.shards/
 *.dwarf
 

@@ -31,6 +31,7 @@ require "./arcana/bus"
 require "./arcana/actor"
 require "./arcana/supervisor"
 require "./arcana/server"
+require "./arcana/mcp"
 require "./arcana/registry"
 
 module Arcana
