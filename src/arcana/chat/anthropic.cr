@@ -102,14 +102,28 @@ module Arcana
               json.field "temperature", request.temperature
             end
 
-            if tools = request.tools
+            has_tools = request.tools || request.server_tools
+            if has_tools
               json.field "tools" do
                 json.array do
-                  tools.each do |tool|
-                    json.object do
-                      json.field "name", tool.name
-                      json.field "description", tool.description
-                      json.field "input_schema", JSON.parse(tool.parameters_json)
+                  if tools = request.tools
+                    tools.each do |tool|
+                      json.object do
+                        json.field "name", tool.name
+                        json.field "description", tool.description
+                        json.field "input_schema", JSON.parse(tool.parameters_json)
+                      end
+                    end
+                  end
+                  if server_tools = request.server_tools
+                    server_tools.each do |st|
+                      json.object do
+                        json.field "type", st.type
+                        json.field "name", st.name
+                        st.config.each do |key, val|
+                          json.field key, val
+                        end
+                      end
                     end
                   end
                 end
@@ -188,6 +202,7 @@ module Arcana
 
         content = nil
         tool_calls = [] of ToolCall
+        server_tool_results = [] of JSON::Any
 
         if blocks = parsed["content"]?.try(&.as_a?)
           blocks.each do |block|
@@ -203,6 +218,11 @@ module Arcana
                   arguments: (block["input"]? || JSON::Any.new({} of String => JSON::Any)).to_json,
                 ),
               )
+            when "server_tool_use"
+              # Server-side tool invocation (e.g. web_search) — tracked but not actionable by client
+              server_tool_results << block
+            when "web_search_tool_result"
+              server_tool_results << block
             end
           end
         end
@@ -234,6 +254,7 @@ module Arcana
           completion_tokens: completion_tokens,
           cache_read_tokens: cache_read_tokens,
           cache_creation_tokens: cache_creation_tokens,
+          server_tool_results: server_tool_results,
         )
       end
     end

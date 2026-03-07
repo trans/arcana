@@ -6,6 +6,7 @@ module Arcana
       property temperature : Float64
       property max_tokens : Int32
       property tools : Array(Tool)?
+      property server_tools : Array(ServerTool)?
       property tool_choice : String?  # "auto", "required", "none", or {"type":"function","function":{"name":"..."}}
       property trace_tags : Hash(String, String)?
 
@@ -15,6 +16,7 @@ module Arcana
         @temperature : Float64 = 0.7,
         @max_tokens : Int32 = 150,
         @tools : Array(Tool)? = nil,
+        @server_tools : Array(ServerTool)? = nil,
         @tool_choice : String? = nil,
         @trace_tags : Hash(String, String)? = nil,
       )

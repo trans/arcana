@@ -21,6 +21,27 @@ describe Arcana::Chat::Tool do
   end
 end
 
+describe Arcana::Chat::ServerTool do
+  it "creates web_search convenience" do
+    st = Arcana::Chat::ServerTool.web_search(max_uses: 3)
+    st.type.should eq("web_search_20250305")
+    st.name.should eq("web_search")
+    st.config["max_uses"].as_i.should eq(3)
+  end
+
+  it "creates web_search without config" do
+    st = Arcana::Chat::ServerTool.web_search
+    st.type.should eq("web_search_20250305")
+    st.config.should be_empty
+  end
+
+  it "creates code_execution convenience" do
+    st = Arcana::Chat::ServerTool.code_execution
+    st.type.should eq("code_execution_20250522")
+    st.name.should eq("code_execution")
+  end
+end
+
 describe Arcana::Chat::ToolCall do
   describe "#parsed_arguments" do
     it "parses valid JSON arguments" do

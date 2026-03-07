@@ -121,6 +121,40 @@ describe Arcana::Chat::Anthropic do
       resp.cache_creation_tokens.should be_nil
     end
 
+    it "captures server tool results" do
+      body = %({
+        "id": "msg_st",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-20250514",
+        "content": [
+          {"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search", "input": {"query": "Crystal lang"}},
+          {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_1", "content": [{"type": "web_search_result", "url": "https://crystal-lang.org", "title": "Crystal"}]},
+          {"type": "text", "text": "Crystal is a compiled language."}
+        ],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 50, "output_tokens": 30}
+      })
+
+      resp = provider.test_parse_response(body)
+      resp.content.should eq("Crystal is a compiled language.")
+      resp.server_tool_results.size.should eq(2)
+      resp.server_tool_results[0]["type"].as_s.should eq("server_tool_use")
+      resp.server_tool_results[1]["type"].as_s.should eq("web_search_tool_result")
+    end
+
+    it "returns empty server_tool_results when none present" do
+      body = %({
+        "content": [{"type": "text", "text": "hi"}],
+        "stop_reason": "end_turn",
+        "model": "test",
+        "usage": {"input_tokens": 5, "output_tokens": 3}
+      })
+
+      resp = provider.test_parse_response(body)
+      resp.server_tool_results.should be_empty
+    end
+
     it "stores raw request and response" do
       body = %({"content": [{"type": "text", "text": "hi"}], "stop_reason": "end_turn", "model": "test"})
       resp = provider.test_parse_response(body, "the-request")

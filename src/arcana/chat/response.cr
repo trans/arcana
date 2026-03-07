@@ -19,6 +19,9 @@ module Arcana
       property cache_read_tokens : Int32?
       property cache_creation_tokens : Int32?
 
+      # Server-side tool results (e.g. web_search results).
+      property server_tool_results : Array(JSON::Any)
+
       def initialize(
         @content : String? = nil,
         @tool_calls : Array(ToolCall) = [] of ToolCall,
@@ -31,6 +34,7 @@ module Arcana
         @completion_tokens : Int32? = nil,
         @cache_read_tokens : Int32? = nil,
         @cache_creation_tokens : Int32? = nil,
+        @server_tool_results : Array(JSON::Any) = [] of JSON::Any,
       )
       end
 
