@@ -22,6 +22,12 @@ require "./arcana/tts/request"
 require "./arcana/tts/result"
 require "./arcana/tts/provider"
 require "./arcana/tts/openai"
+require "./arcana/embed/request"
+require "./arcana/embed/result"
+require "./arcana/embed/provider"
+require "./arcana/embed/openai"
+require "./arcana/bus"
+require "./arcana/registry"
 
 module Arcana
   VERSION = "0.1.0"
