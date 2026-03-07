@@ -47,6 +47,63 @@ module Arcana
           content_length: response.body.bytesize.to_i64)
       end
 
+      def stream(request : Request, ctx : Context? = nil, &block : Bytes ->) : Result
+        raise CancelledError.new if ctx.try(&.cancelled?)
+
+        model = request.model.empty? ? @model : request.model
+        payload = build_payload(request, model)
+        headers = Util.bearer_headers(@api_key)
+        uri = URI.parse(@endpoint)
+        client = HTTP::Client.new(uri)
+        client.connect_timeout = 30.seconds
+        client.read_timeout = 60.seconds
+
+        if c = ctx
+          spawn do
+            until c.cancelled?
+              sleep 100.milliseconds
+            end
+            client.close rescue nil
+          end
+        end
+
+        total_bytes = 0_i64
+        content_type = ""
+
+        begin
+          client.post(uri.request_target, headers: headers, body: payload) do |response|
+            unless response.success?
+              body = response.body_io.gets_to_end
+              raise APIError.new(response.status_code, body, "openai:tts:stream")
+            end
+
+            content_type = response.headers["Content-Type"]? || ""
+            buf = Bytes.new(8192)
+
+            while (bytes_read = response.body_io.read(buf)) > 0
+              raise CancelledError.new if ctx.try(&.cancelled?)
+              chunk = buf[0, bytes_read]
+              total_bytes += bytes_read
+              block.call(chunk)
+            end
+          end
+        rescue ex : CancelledError
+          raise ex
+        rescue ex : IO::Error
+          raise CancelledError.new if ctx.try(&.cancelled?)
+          raise ex
+        end
+
+        Result.new("",
+          model: model,
+          provider: "openai",
+          raw_request: payload,
+          status_code: 200,
+          content_type: content_type,
+          content_length: total_bytes,
+        )
+      end
+
       private def build_payload(request : Request, model : String) : String
         JSON.build do |json|
           json.object do

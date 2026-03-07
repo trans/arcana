@@ -8,6 +8,11 @@ module Arcana
 
       abstract def synthesize(request : Request, output_path : String) : Result
       abstract def name : String
+
+      # Stream audio chunks as they arrive. Override in subclasses.
+      def stream(request : Request, ctx : Context? = nil, &block : Bytes ->) : Result
+        raise Error.new("Streaming not supported by #{name} TTS provider")
+      end
     end
   end
 end

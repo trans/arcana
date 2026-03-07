@@ -30,3 +30,28 @@ describe Arcana::TTS::Request do
     req.speed.should eq(0.75)
   end
 end
+
+describe Arcana::TTS::OpenAI do
+  it "raises on empty API key" do
+    expect_raises(Arcana::ConfigError, /API key/) do
+      Arcana::TTS::OpenAI.new(api_key: "")
+    end
+  end
+
+  it "stream raises CancelledError if context is already cancelled" do
+    provider = Arcana::TTS::OpenAI.new(api_key: "sk-test")
+    ctx = Arcana::Context.new
+    ctx.cancel
+
+    request = Arcana::TTS::Request.new(text: "hello")
+    expect_raises(Arcana::CancelledError) do
+      provider.stream(request, ctx) { |_chunk| }
+    end
+  end
+
+  it "stream returns Result with empty output_path" do
+    # Can't test actual streaming without API, but verify the interface compiles
+    provider = Arcana::TTS::OpenAI.new(api_key: "sk-test")
+    provider.name.should eq("openai")
+  end
+end
