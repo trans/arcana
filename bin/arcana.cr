@@ -8,12 +8,7 @@ dir = Arcana::Directory.new
 
 # -- Register Arcana itself --
 
-dir.register(Arcana::Directory::Listing.new(
-  address: "arcana",
-  name: "Arcana",
-  description: "Provider-agnostic AI communication library for Crystal. Arcana provides unified interfaces for chat completion, image generation, text-to-speech, and embeddings, plus an agent-to-agent communication bus with pub/sub, request/response, and OTP-style supervision.",
-  kind: Arcana::Directory::Kind::Agent,
-  guide: <<-GUIDE,
+arcana_guide = <<-GUIDE
   # Arcana — Crystal AI Communication Library
 
   ## Adding to your project
@@ -128,11 +123,19 @@ dir.register(Arcana::Directory::Listing.new(
   Agents connect via WebSocket at ws://host:port/bus.
   Directory is queryable at GET /directory.
   Messages can be sent via POST /send, POST /request, POST /publish.
-  GUIDE
-  tags: ["ai", "crystal", "library", "chat", "image", "tts", "embed", "bus", "agents"],
-))
+GUIDE
 
 # -- Built-in services --
+
+arcana_svc = Arcana::Service.new(
+  bus: bus, directory: dir,
+  address: "arcana",
+  name: "Arcana",
+  description: "Provider-agnostic AI communication library for Crystal. Arcana provides unified interfaces for chat completion, image generation, text-to-speech, and embeddings, plus an agent-to-agent communication bus with pub/sub, request/response, and OTP-style supervision.",
+  guide: arcana_guide,
+  tags: ["ai", "crystal", "library", "chat", "image", "tts", "embed", "bus", "agents"],
+) { |_data| JSON::Any.new(arcana_guide) }
+arcana_svc.start
 
 # Echo service — useful for testing the bus.
 echo = Arcana::Service.new(
