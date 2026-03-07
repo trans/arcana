@@ -256,8 +256,10 @@ module Arcana
           raise ex
         end
 
+        content_str = content.to_s
+
         final = Response.new(
-          content: content.to_s.empty? ? nil : content.to_s,
+          content: content_str.empty? ? nil : content_str,
           tool_calls: tool_calls,
           finish_reason: finish_reason,
           model: response_model,
