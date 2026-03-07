@@ -1,8 +1,9 @@
 # Arcana
 
-Provider-agnostic AI communication library for Crystal. Arcana provides a
-unified interface across chat completion, image generation, and text-to-speech,
-letting you swap providers without changing application code.
+Provider-agnostic AI communication library for Crystal. Unified interfaces
+for chat completion, image generation, text-to-speech, and embeddings, plus
+an agent-to-agent communication bus with pub/sub, request/response, and
+OTP-style supervision.
 
 ## Installation
 
@@ -18,8 +19,8 @@ Then run `shards install`.
 
 ## Architecture
 
-Arcana is organized into three modules — **Chat**, **Image**, and **TTS** —
-each following the same pattern:
+Arcana is organized into four modules — **Chat**, **Image**, **TTS**, and
+**Embed** — each following the same pattern:
 
 ```
 Provider  (abstract class — defines the interface)
@@ -27,20 +28,20 @@ Request   (struct — what you send)
 Result    (struct — what you get back)
 ```
 
-Every provider includes `Arcana::Traceable`, which accepts an optional
-`Proc(String, Nil)` callback for observability. All results carry raw
-request/response data for debugging.
+On top of these sit the **Bus** (agent communication), **Registry** (provider
+factory), **Actor/Supervisor** (OTP-style process management), and **Server**
+(WebSocket + REST gateway).
 
-Errors follow a simple hierarchy: `Arcana::Error` > `ConfigError` | `APIError`.
+Errors follow a simple hierarchy: `Arcana::Error` > `ConfigError` | `APIError` | `CancelledError`.
 `APIError` captures the HTTP status code and response body.
 
 ## Chat
 
-Providers implement `complete(request) : Response`.
+Providers implement `complete(request) : Response` and `stream(request) { |event| }`.
 
-### OpenAI (and compatible APIs)
+### Providers
 
-Works with any OpenAI-compatible endpoint — OpenAI, Azure, local models, etc.
+**OpenAI** — works with any OpenAI-compatible endpoint (OpenAI, Azure, Ollama, vLLM, etc.)
 
 ```crystal
 provider = Arcana::Chat::OpenAI.new(
@@ -50,15 +51,19 @@ provider = Arcana::Chat::OpenAI.new(
 )
 ```
 
-The `endpoint` parameter is the key to provider flexibility. Point it at
-Ollama, LiteLLM, vLLM, or any service that speaks the OpenAI chat format.
+**Anthropic** — native Messages API with system message extraction, cache token tracking, and server-side tools.
+
+```crystal
+provider = Arcana::Chat::Anthropic.new(
+  api_key: ENV["ANTHROPIC_API_KEY"],
+  model:   "claude-sonnet-4-20250514",
+)
+```
 
 ### Messages and History
 
-Messages are role-tagged (`system`, `user`, `assistant`, `tool`) and serialize
-directly to the OpenAI wire format. `History` manages a rolling conversation
-with automatic trimming at 100k characters, preserving the system prompt and
-the oldest user/assistant exchange for context continuity.
+Messages are role-tagged (`system`, `user`, `assistant`, `tool`). `History`
+manages a rolling conversation with automatic trimming at 100k characters.
 
 ```crystal
 history = Arcana::Chat::History.new
@@ -78,7 +83,6 @@ puts response.content
 ### Function Calling
 
 Define tools with a name, description, and JSON Schema for parameters.
-The model returns `ToolCall` objects you can inspect and dispatch.
 
 ```crystal
 tool = Arcana::Chat::Tool.new(
@@ -90,7 +94,7 @@ tool = Arcana::Chat::Tool.new(
 request = Arcana::Chat::Request.new(
   messages: [Arcana::Chat::Message.user("Weather in Tokyo?")],
   tools: [tool],
-  tool_choice: "auto",  # or "required", "none"
+  tool_choice: "auto",
 )
 
 response = provider.complete(request)
@@ -100,14 +104,71 @@ if response.has_tool_calls?
 end
 ```
 
+### Server-Side Tools
+
+Anthropic server-executed tools like web search and code execution:
+
+```crystal
+request = Arcana::Chat::Request.new(
+  messages: [Arcana::Chat::Message.user("What's the latest Crystal release?")],
+  server_tools: [Arcana::Chat::ServerTool.web_search(max_uses: 5)],
+)
+
+response = provider.complete(request)
+response.server_tool_results  # => raw search result blocks
+```
+
+### Streaming
+
+Block-based streaming for both providers. Text deltas are yielded
+incrementally, tool_use blocks are emitted when complete.
+
+```crystal
+response = provider.stream(request) do |event|
+  case event.type
+  when .text_delta?
+    print event.text
+  when .tool_use?
+    tc = event.tool_call.not_nil!
+  when .done?
+    final = event.response.not_nil!
+  end
+end
+```
+
+### Cancellation
+
+Cancel in-flight requests (both `complete` and `stream`) from another fiber:
+
+```crystal
+ctx = Arcana::Context.new
+
+spawn do
+  provider.stream(request, ctx) { |e| ... }
+rescue Arcana::CancelledError
+  # request was cancelled
+end
+
+# Later, from another fiber:
+ctx.cancel
+```
+
 ### Response
 
 `Chat::Response` gives you:
 - `content` — the model's text reply (nil when it only made tool calls)
 - `tool_calls` — array of `ToolCall` structs
 - `finish_reason` — `"stop"`, `"tool_calls"`, `"length"`, etc.
-- `prompt_tokens` / `completion_tokens` — token usage from the API
+- `prompt_tokens` / `completion_tokens` — token usage
+- `cache_read_tokens` / `cache_creation_tokens` — Anthropic prompt caching
+- `server_tool_results` — server-side tool output blocks
 - `raw_request` / `raw_json` — full wire-level data for debugging
+
+### Model Listing
+
+```crystal
+models = provider.models  # => ["claude-sonnet-4-20250514", "claude-opus-4-20250514", ...]
+```
 
 ## Image
 
@@ -115,23 +176,16 @@ Providers implement `generate(request, output_path) : Result`.
 
 ### Providers
 
-**OpenAI** — DALL-E models via the generations and edits endpoints.
+**OpenAI** — DALL-E and gpt-image models.
 
 ```crystal
-provider = Arcana::Image::OpenAI.new(
-  api_key: ENV["OPENAI_API_KEY"],
-  model:   "gpt-image-1",  # default
-  quality: "medium",
-)
+provider = Arcana::Image::OpenAI.new(api_key: ENV["OPENAI_API_KEY"])
 ```
 
-**Runware** — FLUX model family (Dev, Schnell, Fill) with advanced features.
+**Runware** — FLUX model family with identity conditioning and ControlNet.
 
 ```crystal
-provider = Arcana::Image::Runware.new(
-  api_key: ENV["RUNWARE_API_KEY"],
-  model:   Arcana::Image::Runware::FLUX_DEV,
-)
+provider = Arcana::Image::Runware.new(api_key: ENV["RUNWARE_API_KEY"])
 ```
 
 ### Basic Generation
@@ -140,92 +194,43 @@ provider = Arcana::Image::Runware.new(
 request = Arcana::Image::Request.new(
   prompt: "A crystal shard glowing with arcane energy",
   width: 1024, height: 1024,
-  output_format: "WEBP",
 )
-
 result = provider.generate(request, "/tmp/output.webp")
-puts result.output_path
 ```
-
-Runware automatically snaps dimensions to the nearest FLUX-compatible
-resolution via `Runware.snap_dimensions`.
 
 ### Identity Conditioning
 
-Identity controls character consistency across generations. Four methods
-are available, each with different tradeoffs:
-
-| Method | What it does | Best for |
-|---|---|---|
-| `SeedImage` | img2img — uses reference as compositional base | General re-rendering |
-| `AcePlus` | ACE++ zero-training identity preservation | Portraits, subjects |
-| `PuLID` | Face-specific identity embedding | Face consistency |
-| `IPAdapter` | Style and appearance transfer | Style matching |
+| Method | Best for |
+|---|---|
+| `SeedImage` | General re-rendering (img2img) |
+| `AcePlus` | Portraits, subjects (zero-training) |
+| `PuLID` | Face consistency |
+| `IPAdapter` | Style matching |
 
 ```crystal
-# Quick constructors
-id = Arcana::Image::Identity.seed_image("/path/to/ref.png", strength: 0.95)
-id = Arcana::Image::Identity.ace_plus("/path/to/ref.png", strength: 0.65, task_type: "portrait")
-id = Arcana::Image::Identity.pulid("/path/to/face.png")
-id = Arcana::Image::Identity.ip_adapter("/path/to/style.png", strength: 0.5)
-
-request = Arcana::Image::Request.new(
-  prompt: "Same character in a forest",
-  identity: id,
-)
+id = Arcana::Image::Identity.ace_plus("/path/to/ref.png", strength: 0.65)
+request = Arcana::Image::Request.new(prompt: "Same character in a forest", identity: id)
 ```
-
-Provider support: OpenAI uses SeedImage via its edits endpoint. Runware
-supports all four methods natively.
 
 ### Structural Control (ControlNet)
 
-Control guides generation with pose skeletons, edge maps, or depth maps.
-
 ```crystal
-# Generic ControlNet
 ctrl = Arcana::Image::Control.openpose("/path/to/pose.png", weight: 0.8)
-
-# FLUX-optimized pose (Union Pro 2.0, ends at 65% of steps)
-ctrl = Arcana::Image::Control.flux_pose("/path/to/pose.png")
-
-request = Arcana::Image::Request.new(
-  prompt: "Character in this pose",
-  control: ctrl,
-)
+request = Arcana::Image::Request.new(prompt: "Character in this pose", control: ctrl)
 ```
-
-Runware can also preprocess raw images into pose skeletons:
-
-```crystal
-pose_path = provider.preprocess_pose("/path/to/photo.jpg", "/tmp/pose.png")
-```
-
-### Runware Extras
-
-- `upload_image(path)` — uploads to Runware's CDN, returns a reusable UUID
-- `preprocess_pose(input, output)` — extracts OpenPose skeleton from a photo
-- `enhance_prompt: true` — lets the provider rewrite your prompt for better results
-- Per-generation `cost` reported on `Image::Result`
 
 ## TTS
 
 Providers implement `synthesize(request, output_path) : Result`.
 
-### OpenAI
-
 ```crystal
-provider = Arcana::TTS::OpenAI.new(
-  api_key: ENV["OPENAI_API_KEY"],
-  model:   "gpt-4o-mini-tts",  # default
-)
+provider = Arcana::TTS::OpenAI.new(api_key: ENV["OPENAI_API_KEY"])
 
 request = Arcana::TTS::Request.new(
   text: "Hello from Arcana.",
   voice: "nova",
   response_format: "opus",
   instructions: "Speak warmly and clearly.",
-  speed: 1.0,
 )
 
 result = provider.synthesize(request, "/tmp/hello.opus")
@@ -233,43 +238,174 @@ result = provider.synthesize(request, "/tmp/hello.opus")
 
 **Voices:** alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse
 
-**Formats:** mp3, wav, aac, flac, opus, pcm
+## Embed
 
-## Utilities
-
-`Arcana::Util` provides shared infrastructure:
-
-- `bearer_headers(api_key)` — builds Authorization + Content-Type headers
-- `mime_for(path)` — detects MIME type from file extension
-- `download_file(url, path)` — downloads a URL to disk with timeouts
-- `parameter_hash(**params)` — SHA-256 hash for cache keying
-- `MultipartBuilder` — constructs multipart/form-data requests
-
-## Tracing
-
-Any provider can accept a trace callback for logging or observability:
+Providers implement `embed(request) : Result`.
 
 ```crystal
-tracer = ->(event : String) { Log.info { event } }
+provider = Arcana::Embed::OpenAI.new(api_key: ENV["OPENAI_API_KEY"])
 
-provider = Arcana::Chat::OpenAI.new(
-  api_key: ENV["OPENAI_API_KEY"],
-  trace: tracer,
+request = Arcana::Embed::Request.new(texts: ["Hello world", "Goodbye"])
+result = provider.embed(request)
+
+result.embeddings       # => Array(Array(Float64))
+result.dimensions       # => 1536
+result.total_tokens     # => token count
+```
+
+## Provider Registry
+
+Create providers by name without knowing the concrete class:
+
+```crystal
+chat = Arcana::Registry.create_chat("anthropic", {"api_key" => JSON::Any.new(key)})
+img  = Arcana::Registry.create_image("runware", {"api_key" => JSON::Any.new(key)})
+```
+
+Built-in: `openai` (chat/image/tts/embed), `anthropic` (chat), `runware` (image).
+
+Register your own:
+
+```crystal
+Arcana::Registry.register_chat("custom") { |config| MyProvider.new(config) }
+```
+
+## Agent Communication Bus
+
+Agents and services communicate via the Bus with direct messaging,
+pub/sub fan-out, and request/response patterns.
+
+```crystal
+bus = Arcana::Bus.new
+writer = bus.mailbox("writer")
+artist = bus.mailbox("artist")
+
+# Direct message
+bus.send(Arcana::Envelope.new(from: "writer", to: "artist", subject: "generate", payload: data))
+
+# Pub/sub
+bus.subscribe("image:ready", "writer")
+bus.publish("image:ready", envelope)
+
+# Request/response (blocks until reply or timeout)
+reply = bus.request(envelope, timeout: 5.seconds)
+```
+
+### Directory
+
+Capability registry for discovering agents and services:
+
+```crystal
+dir = Arcana::Directory.new
+dir.register(Arcana::Directory::Listing.new(
+  address: "my-agent",
+  name: "My Agent",
+  description: "Does useful things",
+  kind: Arcana::Directory::Kind::Agent,
+  guide: "Send a request with...",
+  tags: ["ai", "helper"],
+))
+
+dir.search("helper")     # search by name/description/tags
+dir.by_tag("ai")         # filter by tag
+dir.by_kind(Kind::Agent)  # filter by kind
+```
+
+### Services
+
+Non-LLM handlers with automatic schema validation and protocol compliance:
+
+```crystal
+svc = Arcana::Service.new(
+  bus: bus, directory: dir,
+  address: "echo",
+  name: "Echo",
+  description: "Echoes back whatever you send.",
+  guide: "Send any payload and it will be returned.",
+) { |data| data }
+svc.start
+```
+
+Send `_intent: "help"` to any service to get its usage guide.
+
+### Protocol
+
+Handshake protocol for agent negotiation:
+- `Protocol.request(data, intent)` — send a request
+- `Protocol.result(data)` — successful response
+- `Protocol.need(schema, questions, message)` — ask for more info
+- `Protocol.help(guide, schema)` — return documentation
+- `Protocol.error(message, code)` — failure
+
+## Actors and Supervisors
+
+OTP-inspired process management:
+
+```crystal
+class MyActor < Arcana::Actor
+  def init; end
+  def handle(envelope : Arcana::Envelope); end
+  def terminate; end
+end
+
+supervisor = Arcana::Supervisor.new(bus,
+  strategy: Arcana::Supervisor::Strategy::OneForOne,
+  max_restarts: 3,
+  max_seconds: 60,
 )
+supervisor.add(MyActor.new(bus, dir, "my-actor"))
+supervisor.supervise
 ```
 
-Trace events are JSON strings with `phase`, `event_type`, `provider`,
-`endpoint`, and request-specific metadata.
+Strategies: `OneForOne` (restart failed actor) or `OneForAll` (restart all on failure).
 
-## API Documentation
+## Network Server
 
-Full API docs can be generated with:
+WebSocket + REST gateway that bridges remote agents to the local bus:
+
+```crystal
+server = Arcana::Server.new(bus, dir, host: "127.0.0.1", port: 4000)
+server.start  # blocking
+```
+
+- **WebSocket** `ws://host:port/bus` — full bus participation
+- **REST** `GET /directory` — query the directory
+- **REST** `GET /health` — health check
+- **REST** `POST /send`, `/request`, `/publish` — messaging
+- **REST** `POST /register` — create a mailbox + directory listing
+- **REST** `POST /receive` — poll a mailbox for messages
+
+## MCP Bridge
+
+Connects Claude Code (or any MCP client) to the Arcana bus via stdio:
+
+```json
+{
+  "mcpServers": {
+    "arcana": {
+      "type": "stdio",
+      "command": "/path/to/arcana-mcp",
+      "env": { "ARCANA_URL": "http://127.0.0.1:4000" }
+    }
+  }
+}
+```
+
+**Tools:** `arcana_directory`, `arcana_request`, `arcana_send`, `arcana_publish`, `arcana_register`, `arcana_receive`, `arcana_health`
+
+## Running
 
 ```
-just docs
+just build    # compile server + MCP bridge
+just serve    # start the server
+just test     # run specs
+just docs     # generate API docs
 ```
 
-This produces Crystal's standard HTML documentation in `docs/api/`.
+Set environment variables for provider services:
+- `OPENAI_API_KEY` — enables chat:openai, embed:openai, tts:openai
+- `ANTHROPIC_API_KEY` — enables chat:anthropic
+- `RUNWARE_API_KEY` — enables image:runware
 
 ## License
 
