@@ -90,6 +90,37 @@ describe Arcana::Chat::Anthropic do
       end
     end
 
+    it "extracts prompt caching tokens" do
+      body = %({
+        "id": "msg_789",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-20250514",
+        "content": [{"type": "text", "text": "Cached!"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 80, "cache_creation_input_tokens": 15}
+      })
+
+      resp = provider.test_parse_response(body)
+      resp.prompt_tokens.should eq(100)
+      resp.completion_tokens.should eq(20)
+      resp.cache_read_tokens.should eq(80)
+      resp.cache_creation_tokens.should eq(15)
+    end
+
+    it "handles missing cache tokens gracefully" do
+      body = %({
+        "content": [{"type": "text", "text": "No cache"}],
+        "stop_reason": "end_turn",
+        "model": "test",
+        "usage": {"input_tokens": 10, "output_tokens": 5}
+      })
+
+      resp = provider.test_parse_response(body)
+      resp.cache_read_tokens.should be_nil
+      resp.cache_creation_tokens.should be_nil
+    end
+
     it "stores raw request and response" do
       body = %({"content": [{"type": "text", "text": "hi"}], "stop_reason": "end_turn", "model": "test"})
       resp = provider.test_parse_response(body, "the-request")

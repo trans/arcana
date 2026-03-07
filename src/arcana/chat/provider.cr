@@ -5,6 +5,11 @@ module Arcana
 
       abstract def complete(request : Request) : Response
       abstract def name : String
+
+      # List available models. Override in subclasses that support it.
+      def models : Array(String)
+        [] of String
+      end
     end
   end
 end

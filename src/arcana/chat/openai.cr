@@ -22,6 +22,19 @@ module Arcana
         "openai"
       end
 
+      def models : Array(String)
+        uri = URI.parse(@endpoint)
+        models_uri = URI.new(scheme: uri.scheme, host: uri.host, port: uri.port, path: "/v1/models")
+        headers = Util.bearer_headers(@api_key)
+        response = HTTP::Client.get(models_uri, headers: headers)
+        return [] of String unless response.success?
+        parsed = JSON.parse(response.body)
+        data = parsed["data"]?.try(&.as_a?) || return [] of String
+        data.compact_map { |m| m["id"]?.try(&.as_s?) }.sort
+      rescue
+        [] of String
+      end
+
       def complete(request : Request) : Response
         model = request.model.empty? ? @model : request.model
         payload = build_payload(request, model)

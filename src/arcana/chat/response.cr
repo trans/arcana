@@ -15,6 +15,10 @@ module Arcana
       property prompt_tokens : Int32?
       property completion_tokens : Int32?
 
+      # Anthropic prompt caching tokens.
+      property cache_read_tokens : Int32?
+      property cache_creation_tokens : Int32?
+
       def initialize(
         @content : String? = nil,
         @tool_calls : Array(ToolCall) = [] of ToolCall,
@@ -25,6 +29,8 @@ module Arcana
         @raw_json : String = "",
         @prompt_tokens : Int32? = nil,
         @completion_tokens : Int32? = nil,
+        @cache_read_tokens : Int32? = nil,
+        @cache_creation_tokens : Int32? = nil,
       )
       end
 
