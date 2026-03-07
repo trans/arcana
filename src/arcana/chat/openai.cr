@@ -154,7 +154,7 @@ module Arcana
             type: "function",
             function: ToolCall::FunctionCall.new(
               name: tc[:name],
-              arguments: tc[:arguments].to_s.empty? ? "{}" : tc[:arguments].to_s,
+              arguments: (args_str = tc[:arguments].to_s).empty? ? "{}" : args_str,
             ),
           )
           block.call(StreamEvent.tool_use(call))

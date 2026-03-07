@@ -218,7 +218,7 @@ module Arcana
                       type: "function",
                       function: ToolCall::FunctionCall.new(
                         name: current_tool_name,
-                        arguments: current_tool_input.to_s.empty? ? "{}" : current_tool_input.to_s,
+                        arguments: (args_str = current_tool_input.to_s).empty? ? "{}" : args_str,
                       ),
                     )
                     tool_calls << tc
