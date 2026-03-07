@@ -47,6 +47,14 @@ module Arcana
       JSON::Any.new(h)
     end
 
+    # Respond with a how-to guide.
+    def self.help(guide : String, schema : JSON::Any? = nil) : JSON::Any
+      h = base("help")
+      h["guide"] = JSON::Any.new(guide)
+      h["schema"] = schema if schema
+      JSON::Any.new(h)
+    end
+
     # Signal an error.
     def self.error(message : String, code : String? = nil) : JSON::Any
       h = base("error")
@@ -98,6 +106,15 @@ module Arcana
 
     def self.request?(payload : JSON::Any) : Bool
       status(payload) == "request"
+    end
+
+    def self.help?(payload : JSON::Any) : Bool
+      status(payload) == "help"
+    end
+
+    # Extract the guide text from a help response.
+    def self.guide(payload : JSON::Any) : String?
+      payload.as_h?.try(&.["guide"]?).try(&.as_s?)
     end
 
     private def self.base(status : String) : Hash(String, JSON::Any)

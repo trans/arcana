@@ -31,6 +31,7 @@ module Arcana
       @description : String,
       @kind : Directory::Kind = Directory::Kind::Agent,
       @schema : JSON::Any? = nil,
+      @guide : String? = nil,
       @tags : Array(String) = [] of String,
     )
       @mailbox = nil
@@ -67,6 +68,7 @@ module Arcana
         description: @description,
         kind: @kind,
         schema: @schema,
+        guide: @guide,
         tags: @tags,
       ))
       @mailbox = @bus.mailbox(@address)

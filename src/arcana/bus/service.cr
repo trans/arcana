@@ -29,6 +29,7 @@ module Arcana
       @name : String,
       @description : String,
       @schema : JSON::Any? = nil,
+      @guide : String? = nil,
       @tags : Array(String) = [] of String,
       &handler : JSON::Any -> JSON::Any
     )
@@ -41,6 +42,7 @@ module Arcana
         description: @description,
         kind: Directory::Kind::Service,
         schema: @schema,
+        guide: @guide,
         tags: @tags,
       ))
 
@@ -67,6 +69,13 @@ module Arcana
     end
 
     private def handle(envelope : Envelope)
+      # Respond to help requests with the guide.
+      if Protocol.proto?(envelope.payload) && Protocol.intent(envelope.payload) == "help"
+        guide_text = @guide || @description
+        reply(envelope, Protocol.help(guide_text, schema: @schema))
+        return
+      end
+
       data = extract_data(envelope.payload)
 
       # Validate against schema if present

@@ -125,6 +125,79 @@ describe Arcana::Service do
     Arcana::Protocol.message(result.not_nil!.payload).should eq("boom")
   end
 
+  it "responds to help intent with guide" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+
+    schema = JSON.parse(%({"type":"object","required":["prompt"],"properties":{"prompt":{"type":"string"},"width":{"type":"integer"}}}))
+
+    svc = Arcana::Service.new(
+      bus: bus, directory: dir,
+      address: "imager",
+      name: "Image Generator",
+      description: "Generates images",
+      schema: schema,
+      guide: "Send a prompt to generate an image. Width defaults to 1024. Use short, descriptive prompts for best results.",
+    ) { |data| JSON::Any.new("ok") }
+    svc.start
+
+    # Ask for help
+    payload = Arcana::Protocol.request(JSON::Any.new(nil), intent: "help")
+    result = bus.request(
+      Arcana::Envelope.new(from: "client", to: "imager", payload: payload),
+      timeout: 1.second,
+    )
+
+    result.should_not be_nil
+    Arcana::Protocol.help?(result.not_nil!.payload).should be_true
+    Arcana::Protocol.guide(result.not_nil!.payload).should eq("Send a prompt to generate an image. Width defaults to 1024. Use short, descriptive prompts for best results.")
+    # Schema is included too
+    result.not_nil!.payload["schema"]["required"].as_a.map(&.as_s).should eq(["prompt"])
+  end
+
+  it "falls back to description when no guide is set" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+
+    svc = Arcana::Service.new(
+      bus: bus, directory: dir,
+      address: "simple",
+      name: "Simple",
+      description: "A simple service",
+    ) { |data| data }
+    svc.start
+
+    payload = Arcana::Protocol.request(JSON::Any.new(nil), intent: "help")
+    result = bus.request(
+      Arcana::Envelope.new(from: "client", to: "simple", payload: payload),
+      timeout: 1.second,
+    )
+
+    result.should_not be_nil
+    Arcana::Protocol.guide(result.not_nil!.payload).should eq("A simple service")
+  end
+
+  it "includes guide in directory listing" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+
+    svc = Arcana::Service.new(
+      bus: bus, directory: dir,
+      address: "guided",
+      name: "Guided",
+      description: "Has a guide",
+      guide: "Here's how to use me.",
+    ) { |data| data }
+
+    listing = dir.lookup("guided")
+    listing.should_not be_nil
+    listing.not_nil!.guide.should eq("Here's how to use me.")
+
+    # JSON output includes guide
+    json = JSON.parse(listing.not_nil!.to_json)
+    json["guide"].as_s.should eq("Here's how to use me.")
+  end
+
   it "unregisters from directory on stop" do
     bus = Arcana::Bus.new
     dir = Arcana::Directory.new

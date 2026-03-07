@@ -18,6 +18,7 @@ module Arcana
       property description : String
       property kind : Kind
       property schema : JSON::Any?    # input schema (services) or hints (agents)
+      property guide : String?        # how-to guide (natural language)
       property tags : Array(String)
 
       def initialize(
@@ -26,6 +27,7 @@ module Arcana
         @description : String,
         @kind : Kind,
         @schema : JSON::Any? = nil,
+        @guide : String? = nil,
         @tags : Array(String) = [] of String,
       )
       end
@@ -37,6 +39,7 @@ module Arcana
           json.field "description", @description
           json.field "kind", @kind.to_s.downcase
           json.field "schema", @schema if @schema
+          json.field "guide", @guide if @guide
           json.field "tags", @tags unless @tags.empty?
         end
       end
