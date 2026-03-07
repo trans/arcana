@@ -17,7 +17,7 @@ arcana_guide = <<-GUIDE
   ```yaml
   dependencies:
     arcana:
-      github: infocomics/arcana
+      github: trans/arcana
   ```
 
   Then `require "arcana"` in your code.

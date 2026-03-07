@@ -11,7 +11,7 @@ Add to your `shard.yml`:
 ```yaml
 dependencies:
   arcana:
-    github: infocomics/arcana
+    github: trans/arcana
 ```
 
 Then run `shards install`.
