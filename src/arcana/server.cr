@@ -117,6 +117,9 @@ module Arcana
       when {"POST", "/publish"}
         handle_post_publish(ctx)
 
+      when {"POST", "/peek"}
+        handle_post_peek(ctx)
+
       else
         ctx.response.status = HTTP::Status::NOT_FOUND
         ctx.response.print %({"error":"not found"})
@@ -239,6 +242,19 @@ module Arcana
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    private def handle_post_peek(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed["address"]?.try(&.as_s?) || ""
+      raise "address required" if address.empty?
+      check_token!(address, parsed)
+
+      count = @bus.pending(address)
+      ctx.response.print %|{"address":"#{address}","pending":#{count}}|
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %|{"error":"#{ex.message}"}|
     end
 
     private def handle_post_publish(ctx : HTTP::Server::Context)

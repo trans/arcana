@@ -42,6 +42,12 @@ module Arcana
       @mutex.synchronize { @mailboxes.keys.sort }
     end
 
+    # Pending message count for an address. Returns 0 if no mailbox.
+    def pending(address : String) : Int32
+      mb = @mutex.synchronize { @mailboxes[address]? }
+      mb.try(&.pending) || 0
+    end
+
     # -- Direct delivery --
 
     # Send an envelope to its `to` address.

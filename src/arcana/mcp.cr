@@ -13,6 +13,15 @@ module Arcana
   class MCP
     PROTOCOL_VERSION = "2024-11-05"
 
+    # Registered addresses we know about (for resource listing).
+    @registered = [] of String
+    # Active resource subscriptions — address => true.
+    @subscriptions = {} of String => Bool
+    # Mutex for thread-safe subscription access.
+    @sub_mutex = Mutex.new
+    # Whether the mailbox watcher fiber is running.
+    @watcher_running = false
+
     TOOLS = [
       {
         name:        "arcana_directory",
@@ -154,8 +163,11 @@ module Arcana
       when "initialize"
         jsonrpc_result(id, {
           protocolVersion: PROTOCOL_VERSION,
-          capabilities:    {tools: {} of String => String},
-          serverInfo:      {name: "arcana", version: Arcana::VERSION},
+          capabilities:    {
+            tools:     {} of String => String,
+            resources: {subscribe: true, listChanged: true},
+          },
+          serverInfo: {name: "arcana", version: Arcana::VERSION},
         })
 
       when "notifications/initialized"
@@ -171,6 +183,23 @@ module Arcana
         jsonrpc_result(id, {
           content: [{type: "text", text: result}],
         })
+
+      when "resources/list"
+        jsonrpc_result(id, {resources: resource_list})
+
+      when "resources/read"
+        uri = params["uri"]?.try(&.as_s?) || ""
+        jsonrpc_result(id, read_resource(uri))
+
+      when "resources/subscribe"
+        uri = params["uri"]?.try(&.as_s?) || ""
+        handle_subscribe(uri)
+        jsonrpc_result(id, {} of String => String)
+
+      when "resources/unsubscribe"
+        uri = params["uri"]?.try(&.as_s?) || ""
+        handle_unsubscribe(uri)
+        jsonrpc_result(id, {} of String => String)
 
       when "ping"
         jsonrpc_result(id, {} of String => String)
@@ -255,8 +284,9 @@ module Arcana
     end
 
     private def call_register(args : JSON::Any) : String
+      address = args["address"]?.try(&.as_s?) || ""
       body = {
-        address:     args["address"]?.try(&.as_s?) || "",
+        address:     address,
         token:       args["token"]?.try(&.as_s?),
         name:        args["name"]?.try(&.as_s?),
         description: args["description"]?.try(&.as_s?),
@@ -264,15 +294,31 @@ module Arcana
         guide:       args["guide"]?.try(&.as_s?),
         tags:        args["tags"]?,
       }.to_json
-      http_post("/register", body)
+      result = http_post("/register", body)
+
+      # Track address for resource listing + notify client of new resource
+      unless @registered.includes?(address)
+        @registered << address
+        emit_notification("notifications/resources/list_changed")
+      end
+
+      result
     end
 
     private def call_unregister(args : JSON::Any) : String
+      address = args["address"]?.try(&.as_s?) || ""
       body = {
-        address: args["address"]?.try(&.as_s?) || "",
+        address: address,
         token:   args["token"]?.try(&.as_s?),
       }.to_json
-      http_post("/unregister", body)
+      result = http_post("/unregister", body)
+
+      if @registered.delete(address)
+        @sub_mutex.synchronize { @subscriptions.delete(address) }
+        emit_notification("notifications/resources/list_changed")
+      end
+
+      result
     end
 
     private def call_receive(args : JSON::Any) : String
@@ -286,6 +332,84 @@ module Arcana
 
     private def call_health : String
       http_get("/health")
+    end
+
+    # --- Resource support ---
+
+    private def resource_list : Array(NamedTuple(uri: String, name: String, description: String, mimeType: String))
+      @registered.map do |address|
+        {
+          uri:         "arcana://mailbox/#{address}",
+          name:        "#{address} mailbox",
+          description: "Incoming messages for #{address}",
+          mimeType:    "application/json",
+        }
+      end
+    end
+
+    private def read_resource(uri : String) : NamedTuple(contents: Array(NamedTuple(uri: String, mimeType: String, text: String)))
+      # Parse arcana://mailbox/<address>
+      address = uri.sub("arcana://mailbox/", "")
+      body = {address: address, timeout_ms: 0}.to_json
+      messages = http_post("/receive", body)
+
+      {contents: [{uri: uri, mimeType: "application/json", text: messages}]}
+    end
+
+    private def handle_subscribe(uri : String)
+      address = uri.sub("arcana://mailbox/", "")
+      @sub_mutex.synchronize { @subscriptions[address] = true }
+      start_watcher unless @watcher_running
+    end
+
+    private def handle_unsubscribe(uri : String)
+      address = uri.sub("arcana://mailbox/", "")
+      @sub_mutex.synchronize { @subscriptions.delete(address) }
+    end
+
+    # Background fiber that polls subscribed mailboxes via /peek (non-destructive)
+    # and emits notifications/resources/updated when messages are waiting.
+    private def start_watcher
+      @watcher_running = true
+      spawn do
+        # Track last-seen counts to only notify on changes
+        last_counts = {} of String => Int32
+
+        loop do
+          addresses = @sub_mutex.synchronize { @subscriptions.keys }
+          break if addresses.empty?
+
+          addresses.each do |address|
+            begin
+              body = {address: address}.to_json
+              response = http_post("/peek", body)
+              parsed = JSON.parse(response)
+              count = parsed["pending"]?.try(&.as_i?) || 0
+
+              last = last_counts[address]? || 0
+              if count > 0 && count != last
+                emit_notification("notifications/resources/updated", {uri: "arcana://mailbox/#{address}"})
+              end
+              last_counts[address] = count
+            rescue ex
+              STDERR.puts "Watcher error for #{address}: #{ex.message}"
+            end
+          end
+
+          sleep 1.minute
+        end
+        @watcher_running = false
+      end
+    end
+
+    private def emit_notification(method : String, params = nil)
+      msg = if params
+              {jsonrpc: "2.0", method: method, params: params}
+            else
+              {jsonrpc: "2.0", method: method}
+            end
+      STDOUT.puts msg.to_json
+      STDOUT.flush
     end
 
     private def http_get(path : String) : String

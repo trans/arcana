@@ -25,11 +25,8 @@ module Arcana
       def embed(request : Request) : Result
         model = request.model.empty? ? @model : request.model
 
-        payload = {
-          model:           model,
-          input:           request.texts,
-          encoding_format: "float",
-        }.to_json
+        payload = build_payload(model, request)
+        json_payload = payload.to_json
 
         tags = request.trace_tags || {} of String => String
         emit_trace({
@@ -47,7 +44,7 @@ module Arcana
         client = HTTP::Client.new(uri)
         client.connect_timeout = 30.seconds
         client.read_timeout = 120.seconds
-        response = client.post(uri.request_target, headers: headers, body: payload)
+        response = client.post(uri.request_target, headers: headers, body: json_payload)
 
         emit_trace({
           phase:          "api_response_embed",
@@ -63,7 +60,20 @@ module Arcana
           raise APIError.new(response.status_code, response.body, "openai:embed")
         end
 
-        parse_response(response.body, model, payload)
+        parse_response(response.body, model, json_payload)
+      end
+
+      private def build_payload(model : String, request : Request)
+        base = {
+          model:           model,
+          input:           request.texts,
+          encoding_format: "float",
+        }
+        if dims = request.dimensions
+          JSON.parse({model: model, input: request.texts, encoding_format: "float", dimensions: dims}.to_json)
+        else
+          JSON.parse(base.to_json)
+        end
       end
 
       private def parse_response(body : String, model : String, payload : String) : Result
