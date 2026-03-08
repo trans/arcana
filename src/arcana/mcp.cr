@@ -76,6 +76,7 @@ module Arcana
           type:       "object",
           properties: {
             address:     {type: "string", description: "Your address on the bus"},
+            token:       {type: "string", description: "Secret token to protect your mailbox (optional, you choose it)"},
             name:        {type: "string", description: "Display name for the directory"},
             description: {type: "string", description: "What you do (for the directory)"},
             kind:        {type: "string", enum: ["agent", "service"], description: "Agent or service (default: agent)"},
@@ -92,6 +93,7 @@ module Arcana
           type:       "object",
           properties: {
             address:    {type: "string", description: "Your address on the bus"},
+            token:      {type: "string", description: "Your mailbox token (if set during register)"},
             timeout_ms: {type: "integer", description: "How long to wait for a message if mailbox is empty (0 = don't wait, default: 0)"},
           },
           required: ["address"],
@@ -104,6 +106,7 @@ module Arcana
           type:       "object",
           properties: {
             address: {type: "string", description: "The address to unregister"},
+            token:   {type: "string", description: "Your mailbox token (if set during register)"},
           },
           required: ["address"],
         },
@@ -254,6 +257,7 @@ module Arcana
     private def call_register(args : JSON::Any) : String
       body = {
         address:     args["address"]?.try(&.as_s?) || "",
+        token:       args["token"]?.try(&.as_s?),
         name:        args["name"]?.try(&.as_s?),
         description: args["description"]?.try(&.as_s?),
         kind:        args["kind"]?.try(&.as_s?),
@@ -266,6 +270,7 @@ module Arcana
     private def call_unregister(args : JSON::Any) : String
       body = {
         address: args["address"]?.try(&.as_s?) || "",
+        token:   args["token"]?.try(&.as_s?),
       }.to_json
       http_post("/unregister", body)
     end
@@ -273,6 +278,7 @@ module Arcana
     private def call_receive(args : JSON::Any) : String
       body = {
         address:    args["address"]?.try(&.as_s?) || "",
+        token:      args["token"]?.try(&.as_s?),
         timeout_ms: args["timeout_ms"]?.try(&.as_i?) || 0,
       }.to_json
       http_post("/receive", body)

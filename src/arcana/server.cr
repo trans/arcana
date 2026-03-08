@@ -19,6 +19,11 @@ module Arcana
     getter port : Int32
     getter host : String
 
+    # TODO: Revisit token auth — currently a simple shared secret per address.
+    # Consider JWT, expiry, or key length requirements if Arcana is ever
+    # exposed beyond localhost.
+    @tokens = {} of String => String
+
     def initialize(
       @bus : Bus,
       @directory : Directory,
@@ -51,6 +56,13 @@ module Arcana
     def start_in_background
       spawn { start }
       sleep 50.milliseconds # let the server bind
+    end
+
+    private def check_token!(address : String, parsed : JSON::Any)
+      expected = @tokens[address]?
+      return unless expected  # no token set = no auth required
+      given = parsed["token"]?.try(&.as_s?) || ""
+      raise "unauthorized" unless given == expected
     end
 
     private def handle_rest(ctx : HTTP::Server::Context)
@@ -116,6 +128,11 @@ module Arcana
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
 
+      # Store token if provided (agent-chosen shared secret)
+      if token = parsed["token"]?.try(&.as_s?)
+        @tokens[address] = token unless token.empty?
+      end
+
       # Create mailbox so messages can be received
       @bus.mailbox(address)
 
@@ -142,9 +159,11 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
+      check_token!(address, parsed)
 
       @directory.unregister(address)
       @bus.remove_mailbox(address)
+      @tokens.delete(address)
 
       ctx.response.print %({"ok":true,"address":"#{address}"})
     rescue ex
@@ -156,6 +175,7 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
+      check_token!(address, parsed)
 
       timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 0
 

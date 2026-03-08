@@ -110,4 +110,73 @@ describe Arcana::Server do
       server.stop
     end
   end
+
+  it "enforces token auth on receive and unregister" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+
+    server = Arcana::Server.new(bus, dir, port: 14002)
+    server.start_in_background
+
+    begin
+      headers = HTTP::Headers{"Content-Type" => "application/json"}
+
+      # Register with a token
+      body = {address: "secure-agent", token: "s3cret", name: "Secure"}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14002/register", headers: headers, body: body)
+      resp.status_code.should eq(200)
+
+      # Receive with correct token
+      body = {address: "secure-agent", token: "s3cret"}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14002/receive", headers: headers, body: body)
+      resp.status_code.should eq(200)
+
+      # Receive with wrong token
+      body = {address: "secure-agent", token: "wrong"}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14002/receive", headers: headers, body: body)
+      resp.status_code.should eq(400)
+      JSON.parse(resp.body)["error"].as_s.should eq("unauthorized")
+
+      # Receive with no token
+      body = {address: "secure-agent"}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14002/receive", headers: headers, body: body)
+      resp.status_code.should eq(400)
+
+      # Unregister with wrong token
+      body = {address: "secure-agent", token: "wrong"}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14002/unregister", headers: headers, body: body)
+      resp.status_code.should eq(400)
+
+      # Unregister with correct token
+      body = {address: "secure-agent", token: "s3cret"}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14002/unregister", headers: headers, body: body)
+      resp.status_code.should eq(200)
+    ensure
+      server.stop
+    end
+  end
+
+  it "allows receive without token when none was set" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+
+    server = Arcana::Server.new(bus, dir, port: 14003)
+    server.start_in_background
+
+    begin
+      headers = HTTP::Headers{"Content-Type" => "application/json"}
+
+      # Register without a token
+      body = {address: "open-agent", name: "Open"}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14003/register", headers: headers, body: body)
+      resp.status_code.should eq(200)
+
+      # Receive without token — should work
+      body = {address: "open-agent"}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14003/receive", headers: headers, body: body)
+      resp.status_code.should eq(200)
+    ensure
+      server.stop
+    end
+  end
 end
