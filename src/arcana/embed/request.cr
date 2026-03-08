@@ -4,12 +4,14 @@ module Arcana
       property texts : Array(String)
       property model : String
       property dimensions : Int32?
+      property input_type : String?
       property trace_tags : Hash(String, String)?
 
       def initialize(
         @texts : Array(String),
         @model : String = "",
         @dimensions : Int32? = nil,
+        @input_type : String? = nil,
         @trace_tags : Hash(String, String)? = nil,
       )
       end

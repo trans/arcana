@@ -24,6 +24,7 @@ module Arcana
             texts: batch,
             model: request.model,
             dimensions: request.dimensions,
+            input_type: request.input_type,
             trace_tags: request.trace_tags,
           )
           result = embed(batch_request)
@@ -79,6 +80,7 @@ module Arcana
             texts: batch,
             model: request.model,
             dimensions: request.dimensions,
+            input_type: request.input_type,
             trace_tags: request.trace_tags,
           )
           result = embed_with_retry(batch_request, max_retries)

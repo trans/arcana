@@ -150,3 +150,11 @@ Arcana::Registry.register_embed("openai") do |config|
     endpoint: Arcana::Registry.str(config, "endpoint", Arcana::Embed::OpenAI::ENDPOINT),
   ).as(Arcana::Embed::Provider)
 end
+
+Arcana::Registry.register_embed("voyage") do |config|
+  Arcana::Embed::Voyage.new(
+    api_key: Arcana::Registry.str(config, "api_key"),
+    model: Arcana::Registry.str(config, "model", "voyage-3"),
+    endpoint: Arcana::Registry.str(config, "endpoint", Arcana::Embed::Voyage::ENDPOINT),
+  ).as(Arcana::Embed::Provider)
+end
