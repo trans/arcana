@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#
+# Ralph Wiggum loop for Arcana bus agents.
+#
+# Polls the mailbox via /peek, and when messages arrive, spins up a
+# Claude Code instance to read and respond to them.
+#
+# Usage:
+#   bin/ralph <address> [interval_seconds] [project_dir]
+#
+# Examples:
+#   bin/ralph arcana              # poll "arcana" mailbox every 60s
+#   bin/ralph arcana 30           # poll every 30s
+#   bin/ralph arcana 60 ~/Projects/memo  # run in a different project dir
+#
+# Environment:
+#   ARCANA_URL    — server URL (default: http://127.0.0.1:4000)
+#   RALPH_PROMPT  — override the default prompt
+#   RALPH_BUDGET  — max spend per invocation (default: 0.50)
+#   RALPH_TOOLS   — allowed tools (default: all mcp__arcana__*)
+#
+
+set -euo pipefail
+
+ADDRESS="${1:?Usage: bin/ralph <address> [interval] [project_dir]}"
+INTERVAL="${2:-60}"
+PROJECT_DIR="${3:-.}"
+ARCANA_URL="${ARCANA_URL:-http://127.0.0.1:4000}"
+BUDGET="${RALPH_BUDGET:-0.50}"
+TOOLS="${RALPH_TOOLS:-mcp__arcana__arcana_receive,mcp__arcana__arcana_send,mcp__arcana__arcana_directory,mcp__arcana__arcana_register,mcp__arcana__arcana_request,mcp__arcana__arcana_publish,Bash,Read,Glob,Grep}"
+
+DEFAULT_PROMPT="You are an autonomous agent on the Arcana bus with address '${ADDRESS}'.
+
+1. Check your mailbox using arcana_receive (address: ${ADDRESS}).
+2. If you have messages, read them carefully and respond thoughtfully via arcana_send.
+3. If messages reference files or code in this project, use Read/Grep/Glob to look things up before responding.
+4. When done responding to all messages, exit.
+5. If no messages, exit immediately."
+
+PROMPT="${RALPH_PROMPT:-$DEFAULT_PROMPT}"
+
+echo "Ralph loop starting for '${ADDRESS}'"
+echo "  Server:   ${ARCANA_URL}"
+echo "  Interval: ${INTERVAL}s"
+echo "  Project:  $(cd "${PROJECT_DIR}" && pwd)"
+echo "  Budget:   \$${BUDGET}/invocation"
+echo ""
+echo "Press Ctrl+C to stop."
+echo ""
+
+while true; do
+  # Peek — non-destructive check
+  PENDING=$(curl -s -X POST "${ARCANA_URL}/peek" \
+    -H 'Content-Type: application/json' \
+    -d "{\"address\":\"${ADDRESS}\"}" | jq -r '.pending // 0' 2>/dev/null || echo "0")
+
+  if [ "${PENDING}" -gt 0 ]; then
+    echo "[$(date '+%H:%M:%S')] ${PENDING} message(s) waiting — launching Claude..."
+    (
+      cd "${PROJECT_DIR}"
+      claude -p \
+        --max-budget-usd "${BUDGET}" \
+        --allowedTools "${TOOLS}" \
+        "${PROMPT}" 2>&1
+    )
+    echo "[$(date '+%H:%M:%S')] Claude exited."
+    echo ""
+  fi
+
+  sleep "${INTERVAL}"
+done

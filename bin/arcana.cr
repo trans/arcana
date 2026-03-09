@@ -417,11 +417,86 @@ if runware_key = ENV["RUNWARE_API_KEY"]?
   services << "image:runware"
 end
 
+# -- ChatAgents (autonomous LLM-backed agents) --
+#
+# Define agents via ARCANA_AGENTS env var as a JSON array:
+#   ARCANA_AGENTS='[{"address":"helper","name":"Helper","provider":"openai","model":"gpt-4o","system_prompt":"You are helpful."}]'
+#
+# Or define a single agent with individual env vars:
+#   ARCANA_AGENT_ADDRESS=helper
+#   ARCANA_AGENT_NAME=Helper
+#   ARCANA_AGENT_PROVIDER=openai       (or "anthropic")
+#   ARCANA_AGENT_MODEL=gpt-4o
+#   ARCANA_AGENT_SYSTEM_PROMPT="You are helpful."
+#   ARCANA_AGENT_MAX_TOKENS=1024
+#   ARCANA_AGENT_TEMPERATURE=0.7
+
+agents = [] of String
+
+if agents_json = ENV["ARCANA_AGENTS"]?
+  JSON.parse(agents_json).as_a.each do |agent_def|
+    address = agent_def["address"].as_s
+    name = agent_def["name"]?.try(&.as_s?) || address
+    provider_name = agent_def["provider"]?.try(&.as_s?) || "openai"
+    model = agent_def["model"]?.try(&.as_s?) || ""
+    system_prompt = agent_def["system_prompt"]?.try(&.as_s?) || "You are a helpful assistant on the Arcana bus."
+    max_tokens = agent_def["max_tokens"]?.try(&.as_i?) || 1024
+    temperature = agent_def["temperature"]?.try(&.as_f?) || 0.7
+    tags = agent_def["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String
+    description = agent_def["description"]?.try(&.as_s?) || "Autonomous LLM agent"
+
+    chat_provider = case provider_name
+                    when "anthropic"
+                      key = ENV["ANTHROPIC_API_KEY"]? || raise "ANTHROPIC_API_KEY required for agent #{address}"
+                      Arcana::Chat::Anthropic.new(api_key: key).as(Arcana::Chat::Provider)
+                    else
+                      key = ENV["OPENAI_API_KEY"]? || raise "OPENAI_API_KEY required for agent #{address}"
+                      Arcana::Chat::OpenAI.new(api_key: key).as(Arcana::Chat::Provider)
+                    end
+
+    agent = Arcana::ChatAgent.new(
+      bus: bus, directory: dir,
+      address: address, name: name, description: description,
+      provider: chat_provider,
+      system_prompt: system_prompt,
+      model: model, max_tokens: max_tokens, temperature: temperature,
+      tags: tags,
+    )
+    agent.start
+    agents << address
+  end
+elsif agent_address = ENV["ARCANA_AGENT_ADDRESS"]?
+  provider_name = ENV["ARCANA_AGENT_PROVIDER"]? || "openai"
+  chat_provider = case provider_name
+                  when "anthropic"
+                    key = ENV["ANTHROPIC_API_KEY"]? || raise "ANTHROPIC_API_KEY required for agent"
+                    Arcana::Chat::Anthropic.new(api_key: key).as(Arcana::Chat::Provider)
+                  else
+                    key = ENV["OPENAI_API_KEY"]? || raise "OPENAI_API_KEY required for agent"
+                    Arcana::Chat::OpenAI.new(api_key: key).as(Arcana::Chat::Provider)
+                  end
+
+  agent = Arcana::ChatAgent.new(
+    bus: bus, directory: dir,
+    address: agent_address,
+    name: ENV["ARCANA_AGENT_NAME"]? || agent_address,
+    description: ENV["ARCANA_AGENT_DESCRIPTION"]? || "Autonomous LLM agent",
+    provider: chat_provider,
+    system_prompt: ENV["ARCANA_AGENT_SYSTEM_PROMPT"]? || "You are a helpful assistant on the Arcana bus.",
+    model: ENV["ARCANA_AGENT_MODEL"]? || "",
+    max_tokens: (ENV["ARCANA_AGENT_MAX_TOKENS"]? || "1024").to_i,
+    temperature: (ENV["ARCANA_AGENT_TEMPERATURE"]? || "0.7").to_f,
+  )
+  agent.start
+  agents << agent_address
+end
+
 STDERR.puts "Arcana v#{Arcana::VERSION} starting on #{host}:#{port}"
 STDERR.puts "  WebSocket: ws://#{host}:#{port}/bus"
 STDERR.puts "  REST:      http://#{host}:#{port}/directory"
 STDERR.puts "  Health:    http://#{host}:#{port}/health"
 STDERR.puts "  Services:  #{services.join(", ")}"
+STDERR.puts "  Agents:    #{agents.empty? ? "(none)" : agents.join(", ")}"
 STDERR.puts "  Directory: #{dir.list.size} listings"
 
 server = Arcana::Server.new(bus, dir, host: host, port: port)
