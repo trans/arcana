@@ -87,5 +87,48 @@ describe Arcana::Chat::History do
       h.messages[1].content.should eq("first user")
       h.messages[2].content.should eq("first reply")
     end
+
+    it "removes tool_use/tool_result pairs together" do
+      h = Arcana::Chat::History.new
+      h.add_system("sys")
+      h.add_user("first user")
+      h.add_assistant("first reply")
+
+      # Add a tool_use + tool_result pair in the middle
+      tc = Arcana::Chat::ToolCall.new(
+        id: "call_1",
+        type: "function",
+        function: Arcana::Chat::ToolCall::FunctionCall.new("search", "{}"),
+      )
+      h.messages << Arcana::Chat::Message.user("x" * 6000)
+      h.messages << Arcana::Chat::Message.new("assistant", tool_calls: [tc])
+      h.messages << Arcana::Chat::Message.new("tool", content: "result data", tool_call_id: "call_1")
+      h.messages << Arcana::Chat::Message.assistant("based on the search...")
+
+      # Pad to exceed limit
+      20.times do
+        h.add_user("x" * 6000)
+        h.add_assistant("y" * 6000)
+      end
+
+      h.trim_if_needed
+
+      # Verify no orphaned tool_use or tool_result
+      h.messages.each_with_index do |msg, i|
+        if msg.role == "assistant" && msg.tool_calls.try(&.size.>(0))
+          # Next message must be a tool result
+          next_msg = h.messages[i + 1]?
+          next_msg.should_not be_nil
+          next_msg.not_nil!.role.should eq("tool")
+        end
+        if msg.role == "tool"
+          # Previous message must be an assistant with tool_calls (or another tool)
+          prev_msg = h.messages[i - 1]?
+          prev_msg.should_not be_nil
+          prev_role = prev_msg.not_nil!.role
+          (prev_role == "assistant" || prev_role == "tool").should be_true
+        end
+      end
+    end
   end
 end

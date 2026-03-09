@@ -122,13 +122,45 @@ module Arcana
 
       # Trim middle messages to stay under MAX_CONTENT_CHARS.
       # Keeps system (0), first user+assistant (1-2), and newest messages.
+      # Always removes tool_use/tool_result pairs together to maintain
+      # the pairing required by the Anthropic API.
       def trim_if_needed
         total = @messages.sum { |m| (m.content || "").size }
         return if total <= MAX_CONTENT_CHARS
         return if @messages.size <= 5
         while total > MAX_CONTENT_CHARS && @messages.size > 5
-          removed = @messages.delete_at(3)
-          total -= (removed.content || "").size
+          idx = 3
+          break if idx >= @messages.size - 2 # protect newest messages
+
+          msg = @messages[idx]
+
+          # If this is an assistant message with tool_calls, also remove the
+          # following tool_result message(s) to keep them paired.
+          if msg.role == "assistant" && msg.tool_calls.try(&.size.>(0))
+            total -= (msg.content || "").size
+            @messages.delete_at(idx)
+            # Remove subsequent tool_result messages
+            while idx < @messages.size && @messages[idx].role == "tool"
+              total -= (@messages[idx].content || "").size
+              @messages.delete_at(idx)
+            end
+          # If this is a tool_result, remove the preceding assistant message too.
+          elsif msg.role == "tool"
+            # Find and remove the preceding assistant with tool_calls
+            if idx > 0 && @messages[idx - 1].role == "assistant"
+              total -= (@messages[idx - 1].content || "").size
+              @messages.delete_at(idx - 1)
+              idx -= 1
+            end
+            # Remove this and any following tool_result messages
+            while idx < @messages.size && @messages[idx].role == "tool"
+              total -= (@messages[idx].content || "").size
+              @messages.delete_at(idx)
+            end
+          else
+            removed = @messages.delete_at(idx)
+            total -= (removed.content || "").size
+          end
         end
       end
 
