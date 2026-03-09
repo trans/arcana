@@ -58,10 +58,10 @@ while true; do
     echo "[$(date '+%H:%M:%S')] ${PENDING} message(s) waiting — launching Claude..."
     (
       cd "${PROJECT_DIR}"
-      claude -p \
+      echo "${PROMPT}" | claude -p \
         --max-budget-usd "${BUDGET}" \
         --allowedTools "${TOOLS}" \
-        "${PROMPT}" 2>&1
+        2>&1
     )
     echo "[$(date '+%H:%M:%S')] Claude exited."
     echo ""
