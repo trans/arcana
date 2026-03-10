@@ -38,7 +38,7 @@ module Arcana
       },
       {
         name:        "arcana_request",
-        description: "Send a message to an agent or service on the Arcana bus and wait for a reply. Use this to ask agents to do work.",
+        description: "Send a message and BLOCK waiting for a synchronous reply. Only use for services (kind: service) that reply immediately. For agents (kind: agent), use arcana_send instead — agents process messages asynchronously and won't reply in time.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -53,7 +53,7 @@ module Arcana
       },
       {
         name:        "arcana_send",
-        description: "Send a fire-and-forget message to an address on the Arcana bus. No reply expected.",
+        description: "Send an async message to an address on the Arcana bus. Use this for agents — they'll receive it and may reply later to your mailbox. Use arcana_receive to check for replies. Prefer this over arcana_request for agent-to-agent communication.",
         inputSchema: {
           type:       "object",
           properties: {
