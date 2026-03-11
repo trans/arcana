@@ -1,0 +1,180 @@
+#!/bin/bash
+#
+# arcana init — Set up a project for the Arcana agent bus.
+#
+# Installs:
+#   1. Hook scripts to ~/.claude/hooks/ (global, shared by all projects)
+#   2. Hook config into ~/.claude/settings.json
+#   3. .mcp.json into the current project directory
+#
+# Usage:
+#   arcana init           # set up current directory
+#   arcana init ~/myproj  # set up a specific directory
+#
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="${1:-.}"
+PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+
+CLAUDE_DIR="$HOME/.claude"
+HOOKS_DIR="$CLAUDE_DIR/hooks"
+SETTINGS="$CLAUDE_DIR/settings.json"
+
+# Find arcana-mcp binary
+if [ -x "$SCRIPT_DIR/arcana-mcp" ]; then
+  MCP_BIN="$SCRIPT_DIR/arcana-mcp"
+elif command -v arcana-mcp >/dev/null 2>&1; then
+  MCP_BIN="$(command -v arcana-mcp)"
+else
+  echo "Error: arcana-mcp not found. Build it first: crystal build bin/arcana-mcp.cr -o bin/arcana-mcp"
+  exit 1
+fi
+
+echo "Arcana bus setup"
+echo "  Project: $PROJECT_DIR"
+echo "  MCP:     $MCP_BIN"
+echo ""
+
+# --- 1. Install hook scripts ---
+
+mkdir -p "$HOOKS_DIR"
+
+cat > "$HOOKS_DIR/arcana-register.sh" << 'HOOK'
+#!/bin/bash
+# SessionStart hook: register on Arcana bus.
+# Uses basename of project dir as the agent address.
+
+address=$(basename "$CLAUDE_PROJECT_DIR")
+
+curl -sf http://127.0.0.1:4000/register \
+  -H "Content-Type: application/json" \
+  -d "{\"address\":\"$address\",\"kind\":\"agent\"}" \
+  >/dev/null 2>&1
+
+exit 0
+HOOK
+
+cat > "$HOOKS_DIR/arcana-mail.sh" << 'HOOK'
+#!/bin/bash
+# Stop hook: check Arcana bus for pending mail.
+# Uses basename of project dir as the agent address.
+# Notifies once per pending count change to avoid infinite loops.
+
+input=$(cat)
+address=$(basename "$CLAUDE_PROJECT_DIR")
+
+# Check for pending messages
+response=$(curl -sf http://127.0.0.1:4000/peek \
+  -H "Content-Type: application/json" \
+  -d "{\"address\":\"$address\"}" 2>/dev/null)
+
+# If Arcana isn't running or no response, let Claude stop normally
+[ -z "$response" ] && exit 0
+
+pending=$(echo "$response" | jq -r '.pending // 0')
+[ "$pending" -eq 0 ] && exit 0
+
+# Only notify once — if we already notified for this count, let Claude stop
+flag="/tmp/arcana-mail-$address"
+if [ -f "$flag" ] && [ "$(cat "$flag")" = "$pending" ]; then
+  rm -f "$flag"
+  exit 0
+fi
+
+# Record that we notified for this count
+echo "$pending" > "$flag"
+
+s="s"; [ "$pending" -eq 1 ] && s=""
+echo "You have mail! ($pending message$s)" >&2
+exit 2
+HOOK
+
+cat > "$HOOKS_DIR/arcana-unregister.sh" << 'HOOK'
+#!/bin/bash
+# SessionEnd hook: unregister from Arcana bus.
+
+address=$(basename "$CLAUDE_PROJECT_DIR")
+
+curl -sf http://127.0.0.1:4000/unregister \
+  -H "Content-Type: application/json" \
+  -d "{\"address\":\"$address\"}" \
+  >/dev/null 2>&1
+
+# Clean up mail notification flag
+rm -f "/tmp/arcana-mail-$address"
+
+exit 0
+HOOK
+
+chmod +x "$HOOKS_DIR/arcana-register.sh" "$HOOKS_DIR/arcana-mail.sh" "$HOOKS_DIR/arcana-unregister.sh"
+echo "  Hooks installed in $HOOKS_DIR"
+
+# --- 2. Merge hooks into settings.json ---
+
+mkdir -p "$CLAUDE_DIR"
+
+HOOKS_CONFIG='{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/arcana-register.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/arcana-mail.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/arcana-unregister.sh"
+          }
+        ]
+      }
+    ]
+  }
+}'
+
+if [ -f "$SETTINGS" ]; then
+  # Merge hooks into existing settings (preserves other config)
+  MERGED=$(jq -s '.[0] * .[1]' "$SETTINGS" <(echo "$HOOKS_CONFIG"))
+  echo "$MERGED" > "$SETTINGS"
+  echo "  Hooks merged into $SETTINGS"
+else
+  echo "$HOOKS_CONFIG" > "$SETTINGS"
+  echo "  Created $SETTINGS"
+fi
+
+# --- 3. Write/merge .mcp.json ---
+
+ARCANA_MCP="{\"mcpServers\":{\"arcana\":{\"type\":\"stdio\",\"command\":\"$MCP_BIN\",\"env\":{\"ARCANA_URL\":\"http://127.0.0.1:4000\"}}}}"
+
+MCP_FILE="$PROJECT_DIR/.mcp.json"
+if [ -f "$MCP_FILE" ]; then
+  # Merge arcana server into existing config (preserves other MCP servers)
+  MERGED=$(jq -s '.[0].mcpServers * .[1].mcpServers | {mcpServers: .}' "$MCP_FILE" <(echo "$ARCANA_MCP"))
+  echo "$MERGED" > "$MCP_FILE"
+  echo "  Arcana merged into existing $MCP_FILE"
+else
+  echo "$ARCANA_MCP" | jq . > "$MCP_FILE"
+  echo "  .mcp.json created in $PROJECT_DIR"
+fi
+
+echo ""
+echo "Done! Start the Arcana server (bin/arcana) and open Claude Code in any project."
+echo "The agent will auto-register as '$(basename "$PROJECT_DIR")' on the bus."
