@@ -1,5 +1,46 @@
 require "../src/arcana"
 
+# -- Subcommands --
+
+command = ARGV.shift? || "serve"
+
+case command
+when "init"
+  # Delegate to the init script
+  script = File.join(File.dirname(Process.executable_path || __FILE__), "arcana-init")
+  unless File.exists?(script)
+    script = File.join(File.dirname(__DIR__), "bin", "arcana-init")
+  end
+  exit Process.run(script, ARGV, output: STDOUT, error: STDERR).exit_code
+when "version", "--version", "-v"
+  puts "Arcana v#{Arcana::VERSION}"
+  exit 0
+when "help", "--help", "-h"
+  STDERR.puts <<-HELP
+  Arcana v#{Arcana::VERSION} — AI communication bus
+
+  Usage: arcana [command]
+
+  Commands:
+    serve   Start the Arcana server (default)
+    init    Set up a project for the bus
+    version Show version
+
+  Environment:
+    ARCANA_HOST  Server host (default: 127.0.0.1)
+    ARCANA_PORT  Server port (default: 4000)
+  HELP
+  exit 0
+when "serve"
+  # fall through to server startup below
+else
+  STDERR.puts "Unknown command: #{command}"
+  STDERR.puts "Run 'arcana help' for usage."
+  exit 1
+end
+
+# -- Server startup --
+
 host = ENV["ARCANA_HOST"]? || "127.0.0.1"
 port = (ENV["ARCANA_PORT"]? || "4000").to_i
 
