@@ -37,8 +37,9 @@ require "./arcana/chat_agent"
 require "./arcana/supervisor"
 require "./arcana/server"
 require "./arcana/mcp"
+require "./arcana/markdown"
 require "./arcana/registry"
 
 module Arcana
-  VERSION = "0.3.0"
+  VERSION = "0.4.0"
 end
