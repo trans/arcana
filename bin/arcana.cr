@@ -554,7 +554,7 @@ end
 # Or define a single agent with individual env vars:
 #   ARCANA_AGENT_ADDRESS=helper
 #   ARCANA_AGENT_NAME=Helper
-#   ARCANA_AGENT_PROVIDER=openai       (or "anthropic", "gemini")
+#   ARCANA_AGENT_PROVIDER=openai       (or "anthropic", "gemini", "grok", "deepseek")
 #   ARCANA_AGENT_MODEL=gpt-4o
 #   ARCANA_AGENT_SYSTEM_PROMPT="You are helpful."
 #   ARCANA_AGENT_MAX_TOKENS=1024
@@ -581,6 +581,12 @@ if agents_json = ENV["ARCANA_AGENTS"]?
                     when "gemini"
                       key = ENV["GOOGLE_API_KEY"]? || raise "GOOGLE_API_KEY required for agent #{address}"
                       Arcana::Chat::Gemini.new(api_key: key).as(Arcana::Chat::Provider)
+                    when "grok"
+                      key = ENV["XAI_API_KEY"]? || raise "XAI_API_KEY required for agent #{address}"
+                      Arcana::Chat::OpenAI.new(api_key: key, endpoint: "https://api.x.ai/v1/chat/completions", model: "grok-3").as(Arcana::Chat::Provider)
+                    when "deepseek"
+                      key = ENV["DEEPSEEK_API_KEY"]? || raise "DEEPSEEK_API_KEY required for agent #{address}"
+                      Arcana::Chat::OpenAI.new(api_key: key, endpoint: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat").as(Arcana::Chat::Provider)
                     else
                       key = ENV["OPENAI_API_KEY"]? || raise "OPENAI_API_KEY required for agent #{address}"
                       Arcana::Chat::OpenAI.new(api_key: key).as(Arcana::Chat::Provider)
@@ -606,6 +612,12 @@ elsif agent_address = ENV["ARCANA_AGENT_ADDRESS"]?
                   when "gemini"
                     key = ENV["GOOGLE_API_KEY"]? || raise "GOOGLE_API_KEY required for agent"
                     Arcana::Chat::Gemini.new(api_key: key).as(Arcana::Chat::Provider)
+                  when "grok"
+                    key = ENV["XAI_API_KEY"]? || raise "XAI_API_KEY required for agent"
+                    Arcana::Chat::OpenAI.new(api_key: key, endpoint: "https://api.x.ai/v1/chat/completions", model: "grok-3").as(Arcana::Chat::Provider)
+                  when "deepseek"
+                    key = ENV["DEEPSEEK_API_KEY"]? || raise "DEEPSEEK_API_KEY required for agent"
+                    Arcana::Chat::OpenAI.new(api_key: key, endpoint: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat").as(Arcana::Chat::Provider)
                   else
                     key = ENV["OPENAI_API_KEY"]? || raise "OPENAI_API_KEY required for agent"
                     Arcana::Chat::OpenAI.new(api_key: key).as(Arcana::Chat::Provider)

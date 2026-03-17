@@ -121,6 +121,22 @@ Arcana::Registry.register_chat("anthropic") do |config|
   ).as(Arcana::Chat::Provider)
 end
 
+Arcana::Registry.register_chat("grok") do |config|
+  Arcana::Chat::OpenAI.new(
+    api_key: Arcana::Registry.str(config, "api_key"),
+    model: Arcana::Registry.str(config, "model", "grok-3"),
+    endpoint: Arcana::Registry.str(config, "endpoint", "https://api.x.ai/v1/chat/completions"),
+  ).as(Arcana::Chat::Provider)
+end
+
+Arcana::Registry.register_chat("deepseek") do |config|
+  Arcana::Chat::OpenAI.new(
+    api_key: Arcana::Registry.str(config, "api_key"),
+    model: Arcana::Registry.str(config, "model", "deepseek-chat"),
+    endpoint: Arcana::Registry.str(config, "endpoint", "https://api.deepseek.com/v1/chat/completions"),
+  ).as(Arcana::Chat::Provider)
+end
+
 Arcana::Registry.register_chat("gemini") do |config|
   Arcana::Chat::Gemini.new(
     api_key: Arcana::Registry.str(config, "api_key"),
