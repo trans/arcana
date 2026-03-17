@@ -117,6 +117,9 @@ module Arcana
       when {"POST", "/publish"}
         handle_post_publish(ctx)
 
+      when {"POST", "/inbox"}
+        handle_post_inbox(ctx)
+
       when {"POST", "/peek"}
         handle_post_peek(ctx)
 
@@ -174,20 +177,47 @@ module Arcana
       ctx.response.print %({"error":"#{ex.message}"})
     end
 
+    private def handle_post_inbox(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed["address"]?.try(&.as_s?) || ""
+      raise "address required" if address.empty?
+      check_token!(address, parsed)
+
+      unless @bus.has_mailbox?(address)
+        @bus.mailbox(address)
+      end
+
+      mb = @bus.mailbox(address)
+      ctx.response.print mb.inbox.to_json
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
     private def handle_post_receive(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
       check_token!(address, parsed)
 
-      timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 0
-
       unless @bus.has_mailbox?(address)
-        # Auto-create mailbox on first receive
         @bus.mailbox(address)
       end
 
       mb = @bus.mailbox(address)
+
+      # Selective receive by id
+      if id = parsed["id"]?.try(&.as_s?)
+        msg = mb.receive(id)
+        if msg
+          ctx.response.print [msg].to_json
+        else
+          ctx.response.print "[]"
+        end
+        return
+      end
+
+      timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 0
       messages = [] of Envelope
 
       if timeout_ms > 0 && messages.empty?

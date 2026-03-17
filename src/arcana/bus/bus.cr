@@ -21,9 +21,9 @@ module Arcana
     @mutex = Mutex.new
 
     # Get or create a mailbox for an address.
-    def mailbox(address : String, capacity : Int32 = 256) : Mailbox
+    def mailbox(address : String) : Mailbox
       @mutex.synchronize do
-        @mailboxes[address] ||= Mailbox.new(address, capacity)
+        @mailboxes[address] ||= Mailbox.new(address)
       end
     end
 

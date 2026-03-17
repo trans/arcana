@@ -96,14 +96,27 @@ module Arcana
         },
       },
       {
+        name:        "arcana_inbox",
+        description: "List messages in your mailbox WITHOUT consuming them. Returns metadata (correlation_id, from, subject, timestamp) for each message. Use this to see what's waiting, then arcana_receive with an id to selectively consume specific messages.",
+        inputSchema: {
+          type:       "object",
+          properties: {
+            address: {type: "string", description: "Your address on the bus"},
+            token:   {type: "string", description: "Your mailbox token (if set during register)"},
+          },
+          required: ["address"],
+        },
+      },
+      {
         name:        "arcana_receive",
-        description: "Check your mailbox for incoming messages. Returns an array of envelopes. Use timeout_ms to wait for messages if the mailbox is empty.",
+        description: "Check your mailbox for incoming messages. Returns an array of envelopes. Use timeout_ms to wait for messages if the mailbox is empty. Use id to selectively receive a specific message (from arcana_inbox) without consuming the rest.",
         inputSchema: {
           type:       "object",
           properties: {
             address:    {type: "string", description: "Your address on the bus"},
             token:      {type: "string", description: "Your mailbox token (if set during register)"},
             timeout_ms: {type: "integer", description: "How long to wait for a message if mailbox is empty (0 = don't wait, default: 0)"},
+            id:         {type: "string", description: "Correlation ID of a specific message to receive (from arcana_inbox). Only that message is consumed."},
           },
           required: ["address"],
         },
@@ -227,6 +240,8 @@ module Arcana
         call_register(args)
       when "arcana_unregister"
         call_unregister(args)
+      when "arcana_inbox"
+        call_inbox(args)
       when "arcana_receive"
         call_receive(args)
       when "arcana_health"
@@ -321,13 +336,26 @@ module Arcana
       result
     end
 
-    private def call_receive(args : JSON::Any) : String
+    private def call_inbox(args : JSON::Any) : String
       body = {
-        address:    args["address"]?.try(&.as_s?) || "",
-        token:      args["token"]?.try(&.as_s?),
-        timeout_ms: args["timeout_ms"]?.try(&.as_i?) || 0,
+        address: args["address"]?.try(&.as_s?) || "",
+        token:   args["token"]?.try(&.as_s?),
       }.to_json
-      http_post("/receive", body)
+      http_post("/inbox", body)
+    end
+
+    private def call_receive(args : JSON::Any) : String
+      h = {} of String => JSON::Any
+      h["address"] = JSON::Any.new(args["address"]?.try(&.as_s?) || "")
+      if token = args["token"]?.try(&.as_s?)
+        h["token"] = JSON::Any.new(token)
+      end
+      if id = args["id"]?.try(&.as_s?)
+        h["id"] = JSON::Any.new(id)
+      else
+        h["timeout_ms"] = JSON::Any.new(args["timeout_ms"]?.try(&.as_i64?) || 0_i64)
+      end
+      http_post("/receive", h.to_json)
     end
 
     private def call_health : String

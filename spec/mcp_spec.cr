@@ -37,7 +37,7 @@ describe Arcana::MCP do
     response = mcp.test_handle(msg)
     response.should_not be_nil
     tools = response.not_nil!["result"]["tools"].as_a
-    tools.size.should eq(8)
+    tools.size.should eq(9)
   end
 
   it "returns nil for notifications" do
