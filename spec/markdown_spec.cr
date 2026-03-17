@@ -29,4 +29,30 @@ describe Arcana::Markdown do
       Arcana::Markdown.to_html("").should eq("")
     end
   end
+
+  describe ".to_ansi" do
+    it "converts headings to styled terminal output" do
+      result = Arcana::Markdown.to_ansi("# Hello")
+      result.should_not eq("# Hello")
+      result.should contain("Hello")
+    end
+
+    it "converts bold and italic" do
+      result = Arcana::Markdown.to_ansi("**bold** and *italic*")
+      result.should contain("bold")
+      result.should contain("italic")
+    end
+
+    it "converts lists" do
+      md = "- first\n- second\n- third"
+      result = Arcana::Markdown.to_ansi(md)
+      result.should contain("first")
+      result.should contain("second")
+      result.should contain("third")
+    end
+
+    it "handles empty string" do
+      Arcana::Markdown.to_ansi("").should eq("")
+    end
+  end
 end

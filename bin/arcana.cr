@@ -221,9 +221,44 @@ registry_svc = Arcana::Service.new(
 end
 registry_svc.start
 
+# Markdown conversion service
+markdown_schema = JSON.parse(%({"type":"object","properties":{"text":{"type":"string","description":"Markdown text to convert"},"format":{"type":"string","enum":["html","ansi"],"description":"Output format: html (default) or ansi"}},"required":["text"]}))
+
+markdown_svc = Arcana::Service.new(
+  bus: bus, directory: dir,
+  address: "markdown",
+  name: "Markdown Converter",
+  description: "Converts Markdown to HTML or ANSI terminal output.",
+  schema: markdown_schema,
+  guide: <<-GUIDE,
+  Convert Markdown text to HTML or ANSI-styled terminal output.
+
+  Example: {"text": "# Hello\\n\\n**bold** text"}
+  With format: {"text": "# Hello", "format": "ansi"}
+
+  Optional fields:
+    format: "html" (default) or "ansi"
+
+  Returns: {"result": "<h1>Hello</h1>\\n<p><strong>bold</strong> text</p>", "format": "html"}
+  GUIDE
+  tags: ["markdown", "text", "conversion", "utility"],
+) do |data|
+  text = data["text"].as_s
+  format = data["format"]?.try(&.as_s?) || "html"
+  result = case format
+           when "ansi" then Arcana::Markdown.to_ansi(text)
+           else             Arcana::Markdown.to_html(text)
+           end
+  JSON::Any.new({
+    "result" => JSON::Any.new(result),
+    "format" => JSON::Any.new(format),
+  })
+end
+markdown_svc.start
+
 # -- Provider-backed services (only registered when API keys are present) --
 
-services = ["echo", "registry"]
+services = ["echo", "registry", "markdown"]
 
 if openai_key = ENV["OPENAI_API_KEY"]?
   chat_openai = Arcana::Chat::OpenAI.new(api_key: openai_key)
