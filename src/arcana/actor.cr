@@ -82,9 +82,12 @@ module Arcana
       while @running
         envelope = mb.receive
         begin
+          @directory.set_busy(@address, true)
           handle(envelope)
         rescue ex
           on_error(envelope, ex)
+        ensure
+          @directory.set_busy(@address, false)
         end
       end
       terminate

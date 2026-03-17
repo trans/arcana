@@ -46,6 +46,7 @@ module Arcana
     end
 
     @listings = {} of String => Listing
+    @busy = {} of String => Bool
     @mutex = Mutex.new
 
     # Register a listing. Overwrites any existing listing at the same address.
@@ -55,7 +56,20 @@ module Arcana
 
     # Remove a listing by address.
     def unregister(address : String)
-      @mutex.synchronize { @listings.delete(address) }
+      @mutex.synchronize do
+        @listings.delete(address)
+        @busy.delete(address)
+      end
+    end
+
+    # Mark an address as busy or idle.
+    def set_busy(address : String, busy : Bool = true)
+      @mutex.synchronize { @busy[address] = busy }
+    end
+
+    # Check if an address is currently busy.
+    def busy?(address : String) : Bool
+      @mutex.synchronize { @busy[address]? || false }
     end
 
     # Look up a listing by address.
@@ -95,9 +109,42 @@ module Arcana
       JSON.build do |json|
         json.array do
           @mutex.synchronize do
-            @listings.each_value { |l| l.to_json(json) }
+            @listings.each_value do |l|
+              listing_to_json(l, json)
+            end
           end
         end
+      end
+    end
+
+    # Serialize a list of listings with busy status.
+    def to_json(listings : Array(Listing)) : String
+      JSON.build do |json|
+        json.array do
+          @mutex.synchronize do
+            listings.each { |l| listing_to_json(l, json) }
+          end
+        end
+      end
+    end
+
+    # Serialize a single listing with busy status.
+    def to_json(listing : Listing) : String
+      JSON.build do |json|
+        @mutex.synchronize { listing_to_json(listing, json) }
+      end
+    end
+
+    private def listing_to_json(l : Listing, json : JSON::Builder) : Nil
+      json.object do
+        json.field "address", l.address
+        json.field "name", l.name
+        json.field "description", l.description
+        json.field "kind", l.kind.to_s.downcase
+        json.field "busy", @busy[l.address]? || false
+        json.field "schema", l.schema if l.schema
+        json.field "guide", l.guide if l.guide
+        json.field "tags", l.tags unless l.tags.empty?
       end
     end
   end

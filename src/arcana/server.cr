@@ -75,12 +75,12 @@ module Arcana
 
       when {"GET", "/directory"}
         if query = ctx.request.query_params["q"]?
-          ctx.response.print @directory.search(query).to_json
+          ctx.response.print @directory.to_json(@directory.search(query))
         elsif tag = ctx.request.query_params["tag"]?
-          ctx.response.print @directory.by_tag(tag).to_json
+          ctx.response.print @directory.to_json(@directory.by_tag(tag))
         elsif kind = ctx.request.query_params["kind"]?
           k = kind == "agent" ? Directory::Kind::Agent : Directory::Kind::Service
-          ctx.response.print @directory.by_kind(k).to_json
+          ctx.response.print @directory.to_json(@directory.by_kind(k))
         else
           ctx.response.print @directory.to_json
         end
@@ -89,7 +89,7 @@ module Arcana
         if path.starts_with?("/directory/")
           address = path.lchop("/directory/")
           if listing = @directory.lookup(address)
-            ctx.response.print listing.to_json
+            ctx.response.print @directory.to_json(listing)
           else
             ctx.response.status = HTTP::Status::NOT_FOUND
             ctx.response.print %({"error":"not found"})

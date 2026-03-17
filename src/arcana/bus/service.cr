@@ -92,10 +92,13 @@ module Arcana
 
       # Execute handler
       begin
+        @directory.set_busy(@address, true)
         result = @handler.call(data)
         reply(envelope, Protocol.result(result))
       rescue ex
         reply(envelope, Protocol.error(ex.message || "Unknown error"))
+      ensure
+        @directory.set_busy(@address, false)
       end
     end
 

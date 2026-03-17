@@ -101,6 +101,51 @@ describe Arcana::Directory do
     end
   end
 
+  describe "#busy?" do
+    it "defaults to not busy" do
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "a", name: "A", description: "a",
+        kind: Arcana::Directory::Kind::Service,
+      ))
+      dir.busy?("a").should be_false
+    end
+
+    it "tracks busy state" do
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "a", name: "A", description: "a",
+        kind: Arcana::Directory::Kind::Service,
+      ))
+      dir.set_busy("a", true)
+      dir.busy?("a").should be_true
+      dir.set_busy("a", false)
+      dir.busy?("a").should be_false
+    end
+
+    it "clears busy on unregister" do
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "a", name: "A", description: "a",
+        kind: Arcana::Directory::Kind::Service,
+      ))
+      dir.set_busy("a", true)
+      dir.unregister("a")
+      dir.busy?("a").should be_false
+    end
+
+    it "includes busy in JSON output" do
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "a", name: "A", description: "a",
+        kind: Arcana::Directory::Kind::Service,
+      ))
+      dir.set_busy("a", true)
+      parsed = JSON.parse(dir.to_json)
+      parsed[0]["busy"].as_bool.should be_true
+    end
+  end
+
   describe "#to_json" do
     it "serializes all listings" do
       dir = Arcana::Directory.new
