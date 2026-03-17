@@ -121,6 +121,14 @@ Arcana::Registry.register_chat("anthropic") do |config|
   ).as(Arcana::Chat::Provider)
 end
 
+Arcana::Registry.register_chat("gemini") do |config|
+  Arcana::Chat::Gemini.new(
+    api_key: Arcana::Registry.str(config, "api_key"),
+    model: Arcana::Registry.str(config, "model", Arcana::Chat::Gemini::DEFAULT_MODEL),
+    endpoint: Arcana::Registry.str(config, "endpoint", Arcana::Chat::Gemini::ENDPOINT),
+  ).as(Arcana::Chat::Provider)
+end
+
 Arcana::Registry.register_image("openai") do |config|
   Arcana::Image::OpenAI.new(
     api_key: Arcana::Registry.str(config, "api_key"),

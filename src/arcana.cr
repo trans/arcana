@@ -22,6 +22,7 @@ require "./arcana/chat/response"
 require "./arcana/chat/provider"
 require "./arcana/chat/openai"
 require "./arcana/chat/anthropic"
+require "./arcana/chat/gemini"
 require "./arcana/tts/request"
 require "./arcana/tts/result"
 require "./arcana/tts/provider"
@@ -41,5 +42,5 @@ require "./arcana/markdown"
 require "./arcana/registry"
 
 module Arcana
-  VERSION = "0.6.0"
+  VERSION = "0.7.0"
 end

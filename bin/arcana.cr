@@ -443,6 +443,59 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
   services << "chat:anthropic"
 end
 
+if google_key = ENV["GOOGLE_API_KEY"]?
+  chat_gemini = Arcana::Chat::Gemini.new(api_key: google_key)
+  chat_gemini_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: gemini-2.5-flash)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"}},"required":["messages"]}))
+
+  chat_gemini_svc = Arcana::Service.new(
+    bus: bus, directory: dir,
+    address: "chat:gemini",
+    name: "Gemini Chat",
+    description: "Chat completion via Google Gemini API.",
+    schema: chat_gemini_schema,
+    guide: <<-GUIDE,
+    Send a messages array to get a chat completion from Gemini.
+
+    Example request:
+      {"messages": [{"role": "user", "content": "Hello!"}]}
+
+    Optional fields:
+      model: "gemini-2.5-flash" (default), "gemini-2.5-pro", etc.
+      temperature: 0.0-2.0 (default 0.7)
+      max_tokens: response limit (default 4096)
+
+    System messages are extracted and sent as systemInstruction.
+
+    Returns: {"content": "...", "model": "...", "finish_reason": "...",
+              "prompt_tokens": N, "completion_tokens": N}
+    GUIDE
+    tags: ["chat", "llm", "gemini", "google"],
+  ) do |data|
+    msgs = data["messages"].as_a.map do |m|
+      Arcana::Chat::Message.new(
+        role: m["role"].as_s,
+        content: m["content"]?.try(&.as_s?),
+      )
+    end
+    request = Arcana::Chat::Request.new(
+      messages: msgs,
+      model: data["model"]?.try(&.as_s?) || "",
+      temperature: data["temperature"]?.try(&.as_f?) || 0.7,
+      max_tokens: data["max_tokens"]?.try(&.as_i?) || 4096,
+    )
+    response = chat_gemini.complete(request)
+    JSON::Any.new({
+      "content"           => JSON::Any.new(response.content || ""),
+      "model"             => JSON::Any.new(response.model),
+      "finish_reason"     => JSON::Any.new(response.finish_reason || ""),
+      "prompt_tokens"     => JSON::Any.new(response.prompt_tokens || 0),
+      "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
+    })
+  end
+  chat_gemini_svc.start
+  services << "chat:gemini"
+end
+
 if runware_key = ENV["RUNWARE_API_KEY"]?
   image_runware = Arcana::Image::Runware.new(api_key: runware_key)
   image_schema = JSON.parse(%({"type":"object","properties":{"prompt":{"type":"string","description":"Image description"},"output_path":{"type":"string","description":"File path for output image"},"width":{"type":"integer","description":"Width in pixels (default: 1024, auto-snapped to FLUX sizes)"},"height":{"type":"integer","description":"Height in pixels (default: 1024)"},"format":{"type":"string","description":"Output format: WEBP (default), PNG"},"enhance_prompt":{"type":"boolean","description":"Let provider rewrite prompt (default: false)"}},"required":["prompt","output_path"]}))
@@ -501,7 +554,7 @@ end
 # Or define a single agent with individual env vars:
 #   ARCANA_AGENT_ADDRESS=helper
 #   ARCANA_AGENT_NAME=Helper
-#   ARCANA_AGENT_PROVIDER=openai       (or "anthropic")
+#   ARCANA_AGENT_PROVIDER=openai       (or "anthropic", "gemini")
 #   ARCANA_AGENT_MODEL=gpt-4o
 #   ARCANA_AGENT_SYSTEM_PROMPT="You are helpful."
 #   ARCANA_AGENT_MAX_TOKENS=1024
@@ -525,6 +578,9 @@ if agents_json = ENV["ARCANA_AGENTS"]?
                     when "anthropic"
                       key = ENV["ANTHROPIC_API_KEY"]? || raise "ANTHROPIC_API_KEY required for agent #{address}"
                       Arcana::Chat::Anthropic.new(api_key: key).as(Arcana::Chat::Provider)
+                    when "gemini"
+                      key = ENV["GOOGLE_API_KEY"]? || raise "GOOGLE_API_KEY required for agent #{address}"
+                      Arcana::Chat::Gemini.new(api_key: key).as(Arcana::Chat::Provider)
                     else
                       key = ENV["OPENAI_API_KEY"]? || raise "OPENAI_API_KEY required for agent #{address}"
                       Arcana::Chat::OpenAI.new(api_key: key).as(Arcana::Chat::Provider)
@@ -547,6 +603,9 @@ elsif agent_address = ENV["ARCANA_AGENT_ADDRESS"]?
                   when "anthropic"
                     key = ENV["ANTHROPIC_API_KEY"]? || raise "ANTHROPIC_API_KEY required for agent"
                     Arcana::Chat::Anthropic.new(api_key: key).as(Arcana::Chat::Provider)
+                  when "gemini"
+                    key = ENV["GOOGLE_API_KEY"]? || raise "GOOGLE_API_KEY required for agent"
+                    Arcana::Chat::Gemini.new(api_key: key).as(Arcana::Chat::Provider)
                   else
                     key = ENV["OPENAI_API_KEY"]? || raise "OPENAI_API_KEY required for agent"
                     Arcana::Chat::OpenAI.new(api_key: key).as(Arcana::Chat::Provider)
