@@ -50,120 +50,89 @@ dir = Arcana::Directory.new
 # -- Register Arcana itself --
 
 arcana_guide = <<-GUIDE
-  # Arcana — Crystal AI Communication Library
+  # Arcana — AI Communication Library & Agent Bus
 
-  ## Adding to your project
+  ## AI Providers
 
-  Add to shard.yml:
-  ```yaml
-  dependencies:
-    arcana:
-      github: trans/arcana
-  ```
+  ### Chat
+  Providers: OpenAI, Anthropic, Gemini, Grok (xAI), DeepSeek.
+  All support streaming, cancellation, function calling, and model listing.
 
-  Then `require "arcana"` in your code.
-
-  ## Four service modules
-
-  Each module has an abstract Provider, a Request struct, and a Result/Response struct.
-
-  ### Chat (Arcana::Chat)
-  Providers: OpenAI (any OpenAI-compatible endpoint), Anthropic (native Messages API).
-  ```crystal
-  provider = Arcana::Chat::OpenAI.new(api_key: ENV["OPENAI_API_KEY"])
-  # or
-  provider = Arcana::Chat::Anthropic.new(api_key: ENV["ANTHROPIC_API_KEY"])
-
-  request = Arcana::Chat::Request.new(
-    messages: [Arcana::Chat::Message.user("Hello")],
-    model: "gpt-4o",
-    max_tokens: 500,
-  )
-  response = provider.complete(request)
-  puts response.content
-  ```
-  Supports function calling via Chat::Tool and Chat::ToolCall.
-  History manages rolling conversations with auto-trim at 100k chars.
-
-  ### Image (Arcana::Image)
+  ### Image
   Providers: OpenAI (DALL-E/gpt-image), Runware (FLUX models).
-  ```crystal
-  provider = Arcana::Image::Runware.new(api_key: ENV["RUNWARE_API_KEY"])
-  request = Arcana::Image::Request.new(prompt: "a castle", width: 1024, height: 1024)
-  result = provider.generate(request, "/tmp/castle.webp")
-  ```
-  Identity conditioning: SeedImage, AcePlus, PuLID, IPAdapter.
-  Structural control: OpenPose, Canny, Depth via ControlNet.
 
-  ### TTS (Arcana::TTS)
-  Provider: OpenAI (gpt-4o-mini-tts).
-  ```crystal
-  provider = Arcana::TTS::OpenAI.new(api_key: ENV["OPENAI_API_KEY"])
-  request = Arcana::TTS::Request.new(text: "Hello", voice: "nova")
-  result = provider.synthesize(request, "/tmp/hello.opus")
-  ```
-  Voices: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse.
+  ### TTS
+  Provider: OpenAI (gpt-4o-mini-tts). Voices: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse.
 
-  ### Embed (Arcana::Embed)
-  Provider: OpenAI (text-embedding-3-small, endpoint-configurable).
-  ```crystal
-  provider = Arcana::Embed::OpenAI.new(api_key: ENV["OPENAI_API_KEY"])
-  request = Arcana::Embed::Request.new(texts: ["Hello world"])
-  result = provider.embed(request)
-  puts result.embeddings.first.size  # vector dimensions
-  ```
+  ### Embed
+  Providers: OpenAI, Voyage. Supports batch embedding and retry.
 
-  ## Provider Registry
-
-  Create providers by name without knowing the concrete class:
-  ```crystal
-  chat = Arcana::Registry.create_chat("openai", {"api_key" => JSON::Any.new("sk-...")})
-  img  = Arcana::Registry.create_image("runware", {"api_key" => JSON::Any.new("rw-...")})
-  ```
-  Built-in: openai (chat/image/tts/embed), anthropic (chat), runware (image).
-  Register your own with `Registry.register_chat("name") { |config| ... }`.
+  ### Markdown
+  Convert LLM markdown responses: `Arcana::Markdown.to_html(text)` or `to_ansi(text)` for terminal output. Also available as the `markdown` bus service.
 
   ## Agent Communication Bus
 
-  Agents and services communicate via the Bus:
-  ```crystal
-  bus = Arcana::Bus.new
-  mailbox = bus.mailbox("my-agent")
+  Agents and services communicate via envelopes on the bus.
 
-  # Direct messaging
-  bus.send(Arcana::Envelope.new(from: "me", to: "other", payload: ...))
+  ### Sending Messages
 
-  # Pub/sub
-  bus.subscribe("topic", "my-agent")
-  bus.publish("topic", envelope)
+  **Async** (fire and forget — for agents):
+    Use `arcana_send` or `arcana_deliver` with ordering "async".
 
-  # Request/response
-  reply = bus.request(envelope, timeout: 5.seconds)
-  ```
+  **Sync** (block for reply — for services):
+    Use `arcana_request` or `arcana_deliver` with ordering "sync".
 
-  ## Services and Actors
+  **Unified dispatch** (`arcana_deliver`):
+    Set `ordering` to "sync" or "async" on a single tool. This is the preferred approach when the ordering may vary.
 
-  Services (non-LLM) validate input against a schema and respond automatically.
-  Actors (abstract base) have init/handle/terminate lifecycle hooks.
-  Supervisors monitor actors and restart on crash (OneForOne or OneForAll).
+  ### Receiving Messages
+
+  **Check inbox** (`arcana_inbox`): List pending messages WITHOUT consuming them. Returns metadata (correlation_id, from, subject, timestamp).
+
+  **Receive** (`arcana_receive`): Consume messages from your mailbox. Use `id` to selectively consume a specific message by correlation_id.
+
+  ### Multi-Agent Coordination
+
+  **Expected Response Tracking** (`arcana_expect`):
+  When you send messages to multiple agents and need all replies before proceeding:
+  1. Send messages (expectations are tracked via correlation_id)
+  2. Use `arcana_expect action:"check"` to see how many replies are outstanding
+  3. Use `arcana_expect action:"await"` to block until all expected replies arrive
+
+  **Freeze/Thaw** (`arcana_freeze`):
+  Temporarily hold messages out of the receive queue:
+  - `action:"freeze"` — hold a message by correlation_id (it won't appear in receive)
+  - `action:"thaw"` — release a frozen message back to the queue
+  - `action:"thaw_all"` — release all frozen messages
+  - `action:"list"` — see what's currently frozen
+
+  Use cases: pause processing during high-priority work, wait for child agent results before processing new messages.
+
+  ### Pub/Sub
+
+  Subscribe to topics and publish broadcasts:
+    `arcana_publish` sends to all subscribers of a topic.
+
+  ### Discovery
+
+  **Directory** (`arcana_directory`): List all agents and services on the bus. Each listing shows address, name, description, kind (agent/service), busy status, and tags. Query by name, tag, or kind.
+
+  Send `_intent: "help"` to any service to get its usage guide and schema.
 
   ## Protocol
 
-  The handshake protocol uses envelope payloads:
+  The handshake protocol wraps envelope payloads:
   - request(data, intent) — send a request
   - result(data) — successful response
   - need(schema, questions, message) — ask for more info
-  - help(guide, schema) — return how-to documentation
+  - help(guide, schema) — return documentation
   - error(message, code) — failure
 
-  Send `_intent: "help"` to any service to get its usage guide.
+  ## Network
 
-  ## Network Server
-
-  Run `just serve` to start the WebSocket + REST gateway.
-  Agents connect via WebSocket at ws://host:port/bus.
-  Directory is queryable at GET /directory.
-  Messages can be sent via POST /send, POST /request, POST /publish.
+  WebSocket: ws://host:port/bus (real-time bidirectional)
+  REST: /send, /request, /deliver, /receive, /inbox, /publish, /directory, /health
+  MCP: 12 tools for full bus access from Claude Code or any MCP client
 GUIDE
 
 # -- Built-in services --
