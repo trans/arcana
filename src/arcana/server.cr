@@ -114,11 +114,29 @@ module Arcana
       when {"POST", "/request"}
         handle_post_request(ctx)
 
+      when {"POST", "/deliver"}
+        handle_post_deliver(ctx)
+
       when {"POST", "/publish"}
         handle_post_publish(ctx)
 
       when {"POST", "/inbox"}
         handle_post_inbox(ctx)
+
+      when {"POST", "/outstanding"}
+        handle_post_outstanding(ctx)
+
+      when {"POST", "/await"}
+        handle_post_await(ctx)
+
+      when {"POST", "/freeze"}
+        handle_post_freeze(ctx)
+
+      when {"POST", "/thaw"}
+        handle_post_thaw(ctx)
+
+      when {"POST", "/frozen"}
+        handle_post_frozen(ctx)
 
       when {"POST", "/peek"}
         handle_post_peek(ctx)
@@ -256,6 +274,23 @@ module Arcana
       ctx.response.print %({"error":"#{ex.message}"})
     end
 
+    private def handle_post_deliver(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      envelope = envelope_from_json(parsed)
+      timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
+      timeout = timeout_ms.milliseconds
+
+      result = @bus.deliver?(envelope, timeout: timeout)
+      if result
+        ctx.response.print result.to_json
+      else
+        ctx.response.print %({"ok":true})
+      end
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
     private def handle_post_request(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
       envelope = envelope_from_json(parsed)
@@ -269,6 +304,95 @@ module Arcana
         ctx.response.status = HTTP::Status::GATEWAY_TIMEOUT
         ctx.response.print %({"error":"timeout waiting for reply"})
       end
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    private def handle_post_outstanding(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed["address"]?.try(&.as_s?) || ""
+      raise "address required" if address.empty?
+      check_token!(address, parsed)
+
+      mb = @bus.mailbox(address)
+      ctx.response.print %({"address":"#{address}","outstanding":#{mb.outstanding}})
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    private def handle_post_await(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed["address"]?.try(&.as_s?) || ""
+      raise "address required" if address.empty?
+      check_token!(address, parsed)
+
+      timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
+      mb = @bus.mailbox(address)
+      all_met = mb.await_outstanding(timeout_ms.milliseconds)
+      ctx.response.print %({"address":"#{address}","all_met":#{all_met}})
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    private def handle_post_freeze(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed["address"]?.try(&.as_s?) || ""
+      raise "address required" if address.empty?
+      check_token!(address, parsed)
+
+      id = parsed["id"]?.try(&.as_s?) || ""
+      raise "id required" if id.empty?
+      by = parsed["by"]?.try(&.as_s?) || ""
+
+      mb = @bus.mailbox(address)
+      if mb.freeze(id, by)
+        ctx.response.print %({"ok":true})
+      else
+        ctx.response.status = HTTP::Status::NOT_FOUND
+        ctx.response.print %({"error":"message not found"})
+      end
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    private def handle_post_thaw(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed["address"]?.try(&.as_s?) || ""
+      raise "address required" if address.empty?
+      check_token!(address, parsed)
+
+      if parsed["all"]?.try(&.as_bool?)
+        mb = @bus.mailbox(address)
+        count = mb.thaw_all
+        ctx.response.print %({"ok":true,"thawed":#{count}})
+      else
+        id = parsed["id"]?.try(&.as_s?) || ""
+        raise "id required" if id.empty?
+        mb = @bus.mailbox(address)
+        if mb.thaw(id)
+          ctx.response.print %({"ok":true})
+        else
+          ctx.response.status = HTTP::Status::NOT_FOUND
+          ctx.response.print %({"error":"frozen message not found"})
+        end
+      end
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    private def handle_post_frozen(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed["address"]?.try(&.as_s?) || ""
+      raise "address required" if address.empty?
+      check_token!(address, parsed)
+
+      mb = @bus.mailbox(address)
+      ctx.response.print mb.frozen.to_json
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})
@@ -300,6 +424,10 @@ module Arcana
 
     private def envelope_from_json(parsed : JSON::Any) : Envelope
       env = parsed["envelope"]? || parsed
+      ordering = case env["ordering"]?.try(&.as_s?)
+                 when "sync" then Ordering::Sync
+                 else             Ordering::Async
+                 end
       Envelope.new(
         from: env["from"]?.try(&.as_s?) || "",
         to: env["to"]?.try(&.as_s?) || "",
@@ -307,6 +435,7 @@ module Arcana
         payload: env["payload"]? || JSON::Any.new(nil),
         correlation_id: env["correlation_id"]?.try(&.as_s?) || Random::Secure.hex(8),
         reply_to: env["reply_to"]?.try(&.as_s?),
+        ordering: ordering,
       )
     end
 

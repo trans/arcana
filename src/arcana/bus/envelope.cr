@@ -1,6 +1,11 @@
 require "json"
 
 module Arcana
+  enum Ordering
+    Async # fire and forget (default)
+    Sync  # sender blocks for reply
+  end
+
   # A message passed between agents via the Bus.
   struct Envelope
     property from : String
@@ -9,6 +14,7 @@ module Arcana
     property payload : JSON::Any
     property correlation_id : String
     property reply_to : String?
+    property ordering : Ordering
     property timestamp : Time
 
     def initialize(
@@ -18,6 +24,7 @@ module Arcana
       @payload : JSON::Any = JSON::Any.new(nil),
       @correlation_id : String = Random::Secure.hex(8),
       @reply_to : String? = nil,
+      @ordering : Ordering = Ordering::Async,
       @timestamp : Time = Time.utc,
     )
     end
@@ -41,12 +48,17 @@ module Arcana
         json.field "payload", @payload
         json.field "correlation_id", @correlation_id
         json.field "reply_to", @reply_to if @reply_to
+        json.field "ordering", @ordering.to_s.downcase if @ordering.sync?
         json.field "timestamp", @timestamp.to_rfc3339
       end
     end
 
     def self.from_json(raw : String) : self
       parsed = JSON.parse(raw)
+      ordering = case parsed["ordering"]?.try(&.as_s?)
+                 when "sync" then Ordering::Sync
+                 else             Ordering::Async
+                 end
       new(
         from: parsed["from"].as_s,
         to: parsed["to"]?.try(&.as_s?) || "",
@@ -54,6 +66,7 @@ module Arcana
         payload: parsed["payload"]? || JSON::Any.new(nil),
         correlation_id: parsed["correlation_id"]?.try(&.as_s?) || Random::Secure.hex(8),
         reply_to: parsed["reply_to"]?.try(&.as_s?),
+        ordering: ordering,
         timestamp: parsed["timestamp"]?.try { |t| Time.parse_rfc3339(t.as_s) } || Time.utc,
       )
     end

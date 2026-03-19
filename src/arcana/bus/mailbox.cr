@@ -10,6 +10,15 @@ module Arcana
       @messages = Deque(Envelope).new
       @mutex = Mutex.new
       @signal = Channel(Nil).new(1) # buffered signal for wake-ups
+
+      # Expected response tracking
+      @expectations = Set(String).new
+      @expect_mutex = Mutex.new
+      @expect_signal = Channel(Nil).new(1)
+
+      # Frozen message storage
+      @frozen = {} of String => Envelope
+      @frozen_by = {} of String => String
     end
 
     # Number of messages waiting to be received.
@@ -20,6 +29,9 @@ module Arcana
     # Deliver an envelope to this mailbox.
     def deliver(envelope : Envelope)
       @mutex.synchronize { @messages.push(envelope) }
+      on_deliver(envelope)
+      # Auto-fulfill expectations
+      fulfill(envelope.correlation_id)
       # Wake any blocking receiver (non-blocking send, ok if buffer full)
       select
       when @signal.send(nil)
@@ -65,19 +77,147 @@ module Arcana
 
     # Receive a specific message by correlation_id. Returns nil if not found.
     def receive(id : String) : Envelope?
-      @mutex.synchronize do
-        idx = @messages.index { |env| env.correlation_id == id }
-        if idx
-          @messages.delete_at(idx)
-        end
+      env = @mutex.synchronize do
+        idx = @messages.index { |e| e.correlation_id == id }
+        @messages.delete_at(idx) if idx
       end
+      on_consume(env) if env
+      env
     end
 
     # Non-blocking receive. Returns nil if empty.
     def try_receive : Envelope?
-      @mutex.synchronize do
-        @messages.shift?
+      env = @mutex.synchronize { @messages.shift? }
+      on_consume(env) if env
+      env
+    end
+
+    # -- Expected response tracking --
+
+    # Register that we expect a reply with this correlation_id.
+    def expect(correlation_id : String)
+      @expect_mutex.synchronize { @expectations.add(correlation_id) }
+    end
+
+    # Mark an expectation as fulfilled. Called automatically by deliver.
+    def fulfill(correlation_id : String) : Bool
+      fulfilled = @expect_mutex.synchronize do
+        if @expectations.includes?(correlation_id)
+          @expectations.delete(correlation_id)
+          true
+        else
+          false
+        end
+      end
+      if fulfilled
+        select
+        when @expect_signal.send(nil)
+        else
+        end
+      end
+      fulfilled
+    end
+
+    # Count of unfulfilled expectations.
+    def outstanding : Int32
+      @expect_mutex.synchronize { @expectations.size }
+    end
+
+    # Block until all expectations are met or timeout expires.
+    # Returns true if all met, false on timeout.
+    def await_outstanding(timeout : Time::Span) : Bool
+      deadline = Time.instant + timeout
+      loop do
+        return true if outstanding == 0
+        remaining = deadline - Time.instant
+        return false if remaining <= Time::Span.zero
+        select
+        when @expect_signal.receive
+          # check again
+        when timeout(remaining)
+          return outstanding == 0
+        end
       end
     end
+
+    # -- Freeze/Thaw --
+
+    # Freeze a message: move from deque to frozen map.
+    # Returns true if a message was frozen.
+    def freeze(id : String, by : String = "") : Bool
+      result = @mutex.synchronize do
+        idx = @messages.index { |env| env.correlation_id == id }
+        if idx
+          env = @messages.delete_at(idx)
+          @frozen[id] = env
+          @frozen_by[id] = by unless by.empty?
+          true
+        else
+          false
+        end
+      end
+      on_freeze(id, by) if result
+      result
+    end
+
+    # Thaw a frozen message: move back to deque.
+    # Returns the thawed envelope, or nil if not found.
+    def thaw(id : String) : Envelope?
+      env = @mutex.synchronize do
+        e = @frozen.delete(id)
+        @frozen_by.delete(id)
+        @messages.push(e) if e
+        e
+      end
+      if env
+        on_thaw(id)
+        select
+        when @signal.send(nil)
+        else
+        end
+      end
+      env
+    end
+
+    # Thaw all frozen messages back to the deque.
+    def thaw_all : Int32
+      count = @mutex.synchronize do
+        @frozen.each_value { |env| @messages.push(env) }
+        c = @frozen.size
+        @frozen.each_key { |id| on_thaw(id) }
+        @frozen.clear
+        @frozen_by.clear
+        c
+      end
+      if count > 0
+        select
+        when @signal.send(nil)
+        else
+        end
+      end
+      count
+    end
+
+    # List frozen message metadata (non-destructive).
+    def frozen : Array(NamedTuple(correlation_id: String, from: String, subject: String, frozen_by: String, timestamp: Time))
+      @mutex.synchronize do
+        @frozen.map do |id, env|
+          {correlation_id: id, from: env.from, subject: env.subject,
+           frozen_by: @frozen_by[id]? || "", timestamp: env.timestamp}
+        end
+      end
+    end
+
+    # Count of frozen messages.
+    def frozen_count : Int32
+      @mutex.synchronize { @frozen.size }
+    end
+
+    # -- Persistence lifecycle hooks (no-ops by default, overridden by persistence module) --
+
+    protected def on_deliver(envelope : Envelope); end
+    protected def on_consume(envelope : Envelope); end
+    protected def on_freeze(id : String, by : String); end
+    protected def on_thaw(id : String); end
   end
 end

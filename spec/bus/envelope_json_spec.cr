@@ -42,4 +42,28 @@ describe "Arcana::Envelope JSON serialization" do
     json = JSON.parse(env.to_json)
     json["reply_to"]?.should be_nil
   end
+
+  it "omits ordering when async (default)" do
+    env = Arcana::Envelope.new(from: "a")
+    json = JSON.parse(env.to_json)
+    json["ordering"]?.should be_nil
+  end
+
+  it "includes ordering when sync" do
+    env = Arcana::Envelope.new(from: "a", ordering: Arcana::Ordering::Sync)
+    json = JSON.parse(env.to_json)
+    json["ordering"].as_s.should eq("sync")
+  end
+
+  it "round-trips ordering through JSON" do
+    env = Arcana::Envelope.new(from: "a", ordering: Arcana::Ordering::Sync)
+    restored = Arcana::Envelope.from_json(env.to_json)
+    restored.ordering.should eq(Arcana::Ordering::Sync)
+  end
+
+  it "defaults ordering to async when absent in JSON" do
+    json = %({"from":"a"})
+    env = Arcana::Envelope.from_json(json)
+    env.ordering.should eq(Arcana::Ordering::Async)
+  end
 end

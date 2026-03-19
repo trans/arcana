@@ -66,6 +66,22 @@ module Arcana
         },
       },
       {
+        name:        "arcana_deliver",
+        description: "Send a message with explicit ordering. Use ordering 'sync' to block and wait for a reply (like arcana_request), or 'async' to fire and forget (like arcana_send). Defaults to async.",
+        inputSchema: {
+          type:       "object",
+          properties: {
+            from:       {type: "string", description: "Your address on the bus"},
+            to:         {type: "string", description: "Target address on the bus"},
+            subject:    {type: "string", description: "Message subject"},
+            payload:    {description: "Message payload (any JSON value)"},
+            ordering:   {type: "string", enum: ["sync", "async"], description: "Message ordering: sync (block for reply) or async (fire and forget, default)"},
+            timeout_ms: {type: "integer", description: "Timeout in milliseconds for sync ordering (default: 30000)"},
+          },
+          required: ["to"],
+        },
+      },
+      {
         name:        "arcana_publish",
         description: "Publish a message to a topic on the Arcana bus. All subscribers receive a copy.",
         inputSchema: {
@@ -131,6 +147,35 @@ module Arcana
             token:   {type: "string", description: "Your mailbox token (if set during register)"},
           },
           required: ["address"],
+        },
+      },
+      {
+        name:        "arcana_expect",
+        description: "Manage expected response tracking. Use 'check' to see how many outstanding expectations exist, or 'await' to block until all expected responses have arrived.",
+        inputSchema: {
+          type:       "object",
+          properties: {
+            address:    {type: "string", description: "Your address on the bus"},
+            token:      {type: "string", description: "Your mailbox token (if set during register)"},
+            action:     {type: "string", enum: ["check", "await"], description: "Action: check (count outstanding) or await (block until all met)"},
+            timeout_ms: {type: "integer", description: "Timeout for await in milliseconds (default: 30000)"},
+          },
+          required: ["address", "action"],
+        },
+      },
+      {
+        name:        "arcana_freeze",
+        description: "Manage frozen messages. Freeze holds a message out of the receive queue; thaw releases it back. Use 'list' to see frozen messages.",
+        inputSchema: {
+          type:       "object",
+          properties: {
+            address: {type: "string", description: "Mailbox address"},
+            token:   {type: "string", description: "Mailbox token (if set during register)"},
+            action:  {type: "string", enum: ["freeze", "thaw", "thaw_all", "list"], description: "Action to perform"},
+            id:      {type: "string", description: "Correlation ID of the message (required for freeze/thaw)"},
+            by:      {type: "string", description: "Who is freezing the message (optional, for freeze action)"},
+          },
+          required: ["address", "action"],
         },
       },
       {
@@ -230,6 +275,8 @@ module Arcana
       case name
       when "arcana_directory"
         call_directory(args)
+      when "arcana_deliver"
+        call_deliver(args)
       when "arcana_request"
         call_request(args)
       when "arcana_send"
@@ -244,6 +291,10 @@ module Arcana
         call_inbox(args)
       when "arcana_receive"
         call_receive(args)
+      when "arcana_expect"
+        call_expect(args)
+      when "arcana_freeze"
+        call_freeze(args)
       when "arcana_health"
         call_health
       else
@@ -265,6 +316,19 @@ module Arcana
       else
         http_get("/directory")
       end
+    end
+
+    private def call_deliver(args : JSON::Any) : String
+      ordering = args["ordering"]?.try(&.as_s?) || "async"
+      body = {
+        from:       args["from"]?.try(&.as_s?) || "mcp-bridge",
+        to:         args["to"]?.try(&.as_s?) || "",
+        subject:    args["subject"]?.try(&.as_s?) || "",
+        payload:    args["payload"]? || JSON::Any.new(nil),
+        ordering:   ordering,
+        timeout_ms: args["timeout_ms"]?.try(&.as_i?) || 30_000,
+      }.to_json
+      http_post("/deliver", body)
     end
 
     private def call_request(args : JSON::Any) : String
@@ -356,6 +420,59 @@ module Arcana
         h["timeout_ms"] = JSON::Any.new(args["timeout_ms"]?.try(&.as_i64?) || 0_i64)
       end
       http_post("/receive", h.to_json)
+    end
+
+    private def call_expect(args : JSON::Any) : String
+      address = args["address"]?.try(&.as_s?) || ""
+      action = args["action"]?.try(&.as_s?) || "check"
+      case action
+      when "check"
+        body = {address: address, token: args["token"]?.try(&.as_s?)}.to_json
+        http_post("/outstanding", body)
+      when "await"
+        body = {
+          address:    address,
+          token:      args["token"]?.try(&.as_s?),
+          timeout_ms: args["timeout_ms"]?.try(&.as_i?) || 30_000,
+        }.to_json
+        http_post("/await", body)
+      else
+        %({"error":"unknown action: #{action}"})
+      end
+    end
+
+    private def call_freeze(args : JSON::Any) : String
+      address = args["address"]?.try(&.as_s?) || ""
+      action = args["action"]?.try(&.as_s?) || "list"
+      case action
+      when "freeze"
+        body = {
+          address: address,
+          token:   args["token"]?.try(&.as_s?),
+          id:      args["id"]?.try(&.as_s?) || "",
+          by:      args["by"]?.try(&.as_s?) || "",
+        }.to_json
+        http_post("/freeze", body)
+      when "thaw"
+        body = {
+          address: address,
+          token:   args["token"]?.try(&.as_s?),
+          id:      args["id"]?.try(&.as_s?) || "",
+        }.to_json
+        http_post("/thaw", body)
+      when "thaw_all"
+        body = {
+          address: address,
+          token:   args["token"]?.try(&.as_s?),
+          all:     true,
+        }.to_json
+        http_post("/thaw", body)
+      when "list"
+        body = {address: address, token: args["token"]?.try(&.as_s?)}.to_json
+        http_post("/frozen", body)
+      else
+        %({"error":"unknown action: #{action}"})
+      end
     end
 
     private def call_health : String

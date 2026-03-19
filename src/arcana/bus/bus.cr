@@ -65,6 +65,17 @@ module Arcana
       true
     end
 
+    # Send an envelope and register an expectation for a reply on the sender's mailbox.
+    # Returns the correlation_id for tracking.
+    def send_expecting(envelope : Envelope) : String
+      if !envelope.from.empty?
+        from_mb = mailbox(envelope.from)
+        from_mb.expect(envelope.correlation_id)
+      end
+      send(envelope)
+      envelope.correlation_id
+    end
+
     # -- Pub/Sub --
 
     # Subscribe an address to a topic.
@@ -115,6 +126,32 @@ module Arcana
           reply_to: envelope.reply_to,
         )
         mb.deliver(msg)
+      end
+    end
+
+    # -- Unified delivery --
+
+    # Dispatch based on the envelope's ordering field.
+    # Sync: creates reply mailbox, sends, waits, returns response.
+    # Async: delivers and returns nil.
+    def deliver(envelope : Envelope, timeout : Time::Span = 30.seconds) : Envelope?
+      case envelope.ordering
+      when Ordering::Sync
+        request(envelope, timeout: timeout)
+      else
+        send(envelope)
+        nil
+      end
+    end
+
+    # Like deliver, but silently drops if the target mailbox doesn't exist.
+    def deliver?(envelope : Envelope, timeout : Time::Span = 30.seconds) : Envelope?
+      case envelope.ordering
+      when Ordering::Sync
+        request(envelope, timeout: timeout)
+      else
+        send?(envelope)
+        nil
       end
     end
 

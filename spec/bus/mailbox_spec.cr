@@ -95,4 +95,130 @@ describe Arcana::Mailbox do
       mb.pending.should eq(1)
     end
   end
+
+  describe "expected response tracking" do
+    it "starts with zero outstanding" do
+      mb = Arcana::Mailbox.new("test")
+      mb.outstanding.should eq(0)
+    end
+
+    it "tracks expectations" do
+      mb = Arcana::Mailbox.new("test")
+      mb.expect("corr-1")
+      mb.expect("corr-2")
+      mb.outstanding.should eq(2)
+    end
+
+    it "auto-fulfills on deliver" do
+      mb = Arcana::Mailbox.new("test")
+      mb.expect("corr-1")
+      mb.outstanding.should eq(1)
+
+      mb.deliver(Arcana::Envelope.new(from: "a", correlation_id: "corr-1"))
+      mb.outstanding.should eq(0)
+    end
+
+    it "fulfill returns false for unknown correlation_id" do
+      mb = Arcana::Mailbox.new("test")
+      mb.fulfill("nonexistent").should be_false
+    end
+
+    it "await_outstanding returns true when no expectations" do
+      mb = Arcana::Mailbox.new("test")
+      mb.await_outstanding(10.milliseconds).should be_true
+    end
+
+    it "await_outstanding returns false on timeout" do
+      mb = Arcana::Mailbox.new("test")
+      mb.expect("corr-1")
+      mb.await_outstanding(10.milliseconds).should be_false
+    end
+
+    it "await_outstanding returns true when fulfilled" do
+      mb = Arcana::Mailbox.new("test")
+      mb.expect("corr-1")
+
+      spawn do
+        sleep 5.milliseconds
+        mb.deliver(Arcana::Envelope.new(from: "a", correlation_id: "corr-1"))
+      end
+
+      mb.await_outstanding(1.second).should be_true
+    end
+  end
+
+  describe "freeze/thaw" do
+    it "freezes a message by correlation_id" do
+      mb = Arcana::Mailbox.new("test")
+      mb.deliver(Arcana::Envelope.new(from: "a", subject: "hello", correlation_id: "id-1"))
+      mb.pending.should eq(1)
+
+      mb.freeze("id-1", "supervisor").should be_true
+      mb.pending.should eq(0)
+      mb.frozen_count.should eq(1)
+    end
+
+    it "frozen messages don't appear in receive" do
+      mb = Arcana::Mailbox.new("test")
+      mb.deliver(Arcana::Envelope.new(from: "a", correlation_id: "id-1"))
+      mb.freeze("id-1", "test")
+
+      mb.try_receive.should be_nil
+    end
+
+    it "frozen messages don't appear in inbox" do
+      mb = Arcana::Mailbox.new("test")
+      mb.deliver(Arcana::Envelope.new(from: "a", correlation_id: "id-1"))
+      mb.freeze("id-1", "test")
+
+      mb.inbox.should be_empty
+    end
+
+    it "thaw returns message to deque" do
+      mb = Arcana::Mailbox.new("test")
+      mb.deliver(Arcana::Envelope.new(from: "a", subject: "hello", correlation_id: "id-1"))
+      mb.freeze("id-1", "test")
+
+      env = mb.thaw("id-1")
+      env.should_not be_nil
+      env.not_nil!.subject.should eq("hello")
+      mb.pending.should eq(1)
+      mb.frozen_count.should eq(0)
+    end
+
+    it "thaw_all returns all frozen messages" do
+      mb = Arcana::Mailbox.new("test")
+      mb.deliver(Arcana::Envelope.new(from: "a", correlation_id: "id-1"))
+      mb.deliver(Arcana::Envelope.new(from: "b", correlation_id: "id-2"))
+      mb.freeze("id-1", "test")
+      mb.freeze("id-2", "test")
+      mb.pending.should eq(0)
+
+      mb.thaw_all.should eq(2)
+      mb.pending.should eq(2)
+      mb.frozen_count.should eq(0)
+    end
+
+    it "freeze returns false for unknown id" do
+      mb = Arcana::Mailbox.new("test")
+      mb.freeze("nonexistent", "test").should be_false
+    end
+
+    it "thaw returns nil for unknown id" do
+      mb = Arcana::Mailbox.new("test")
+      mb.thaw("nonexistent").should be_nil
+    end
+
+    it "lists frozen message metadata" do
+      mb = Arcana::Mailbox.new("test")
+      mb.deliver(Arcana::Envelope.new(from: "alice", subject: "hold", correlation_id: "id-1"))
+      mb.freeze("id-1", "supervisor")
+
+      listing = mb.frozen
+      listing.size.should eq(1)
+      listing[0][:correlation_id].should eq("id-1")
+      listing[0][:from].should eq("alice")
+      listing[0][:frozen_by].should eq("supervisor")
+    end
+  end
 end

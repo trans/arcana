@@ -15,6 +15,16 @@ describe Arcana::Envelope do
     e.timestamp.should be <= after
   end
 
+  it "defaults ordering to async" do
+    e = Arcana::Envelope.new(from: "a")
+    e.ordering.should eq(Arcana::Ordering::Async)
+  end
+
+  it "accepts ordering parameter" do
+    e = Arcana::Envelope.new(from: "a", ordering: Arcana::Ordering::Sync)
+    e.ordering.should eq(Arcana::Ordering::Sync)
+  end
+
   describe "#reply" do
     it "creates a reply addressed to reply_to" do
       original = Arcana::Envelope.new(
