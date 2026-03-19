@@ -61,9 +61,9 @@ describe "Arcana::Envelope JSON serialization" do
     restored.ordering.should eq(Arcana::Ordering::Sync)
   end
 
-  it "defaults ordering to async when absent in JSON" do
+  it "defaults ordering to auto when absent in JSON" do
     json = %({"from":"a"})
     env = Arcana::Envelope.from_json(json)
-    env.ordering.should eq(Arcana::Ordering::Async)
+    env.ordering.should eq(Arcana::Ordering::Auto)
   end
 end

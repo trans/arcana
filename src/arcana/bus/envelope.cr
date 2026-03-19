@@ -2,7 +2,8 @@ require "json"
 
 module Arcana
   enum Ordering
-    Async # fire and forget (default)
+    Auto  # resolved by bus based on target kind (default)
+    Async # fire and forget
     Sync  # sender blocks for reply
   end
 
@@ -24,7 +25,7 @@ module Arcana
       @payload : JSON::Any = JSON::Any.new(nil),
       @correlation_id : String = Random::Secure.hex(8),
       @reply_to : String? = nil,
-      @ordering : Ordering = Ordering::Async,
+      @ordering : Ordering = Ordering::Auto,
       @timestamp : Time = Time.utc,
     )
     end
@@ -48,7 +49,7 @@ module Arcana
         json.field "payload", @payload
         json.field "correlation_id", @correlation_id
         json.field "reply_to", @reply_to if @reply_to
-        json.field "ordering", @ordering.to_s.downcase if @ordering.sync?
+        json.field "ordering", @ordering.to_s.downcase unless @ordering.auto?
         json.field "timestamp", @timestamp.to_rfc3339
       end
     end
@@ -56,8 +57,9 @@ module Arcana
     def self.from_json(raw : String) : self
       parsed = JSON.parse(raw)
       ordering = case parsed["ordering"]?.try(&.as_s?)
-                 when "sync" then Ordering::Sync
-                 else             Ordering::Async
+                 when "sync"  then Ordering::Sync
+                 when "async" then Ordering::Async
+                 else              Ordering::Auto
                  end
       new(
         from: parsed["from"].as_s,

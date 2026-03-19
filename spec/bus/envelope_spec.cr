@@ -15,9 +15,9 @@ describe Arcana::Envelope do
     e.timestamp.should be <= after
   end
 
-  it "defaults ordering to async" do
+  it "defaults ordering to auto" do
     e = Arcana::Envelope.new(from: "a")
-    e.ordering.should eq(Arcana::Ordering::Async)
+    e.ordering.should eq(Arcana::Ordering::Auto)
   end
 
   it "accepts ordering parameter" do

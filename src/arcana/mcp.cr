@@ -37,8 +37,8 @@ module Arcana
         },
       },
       {
-        name:        "arcana_request",
-        description: "Send a message and BLOCK waiting for a synchronous reply. Only use for services (kind: service) that reply immediately. For agents (kind: agent), use arcana_send instead — agents process messages asynchronously and won't reply in time.",
+        name:        "arcana_deliver",
+        description: "Send a message on the Arcana bus. By default (ordering: auto), the bus decides sync vs async based on the target: services get sync (blocks for reply), agents get async (fire and forget, check arcana_receive later). Override with ordering 'sync' or 'async'. The response tells you which mode was used and the correlation_id for tracking.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -46,36 +46,7 @@ module Arcana
             to:         {type: "string", description: "Target address on the bus"},
             subject:    {type: "string", description: "Message subject/intent"},
             payload:    {description: "Message payload (any JSON value)"},
-            timeout_ms: {type: "integer", description: "Timeout in milliseconds (default: 30000)"},
-          },
-          required: ["to"],
-        },
-      },
-      {
-        name:        "arcana_send",
-        description: "Send an async message to an address on the Arcana bus. Use this for agents — they'll receive it and may reply later to your mailbox. Use arcana_receive to check for replies. Prefer this over arcana_request for agent-to-agent communication.",
-        inputSchema: {
-          type:       "object",
-          properties: {
-            from:    {type: "string", description: "Your address on the bus"},
-            to:      {type: "string", description: "Target address on the bus"},
-            subject: {type: "string", description: "Message subject"},
-            payload: {description: "Message payload (any JSON value)"},
-          },
-          required: ["to"],
-        },
-      },
-      {
-        name:        "arcana_deliver",
-        description: "Send a message with explicit ordering. Use ordering 'sync' to block and wait for a reply (like arcana_request), or 'async' to fire and forget (like arcana_send). Defaults to async.",
-        inputSchema: {
-          type:       "object",
-          properties: {
-            from:       {type: "string", description: "Your address on the bus"},
-            to:         {type: "string", description: "Target address on the bus"},
-            subject:    {type: "string", description: "Message subject"},
-            payload:    {description: "Message payload (any JSON value)"},
-            ordering:   {type: "string", enum: ["sync", "async"], description: "Message ordering: sync (block for reply) or async (fire and forget, default)"},
+            ordering:   {type: "string", enum: ["auto", "sync", "async"], description: "Message ordering: auto (default, resolved by target kind), sync (block for reply), or async (fire and forget)"},
             timeout_ms: {type: "integer", description: "Timeout in milliseconds for sync ordering (default: 30000)"},
           },
           required: ["to"],
@@ -96,11 +67,12 @@ module Arcana
       },
       {
         name:        "arcana_register",
-        description: "Register yourself as an agent on the Arcana bus. Creates a mailbox so you can receive messages. Optionally registers in the directory with name/description.",
+        description: "Register or unregister on the Arcana bus. Default action is 'register' which creates a mailbox and optionally adds a directory listing. Use action 'unregister' to remove your mailbox and listing. Use action 'busy' or 'idle' to update your availability status.",
         inputSchema: {
           type:       "object",
           properties: {
             address:     {type: "string", description: "Your address on the bus"},
+            action:      {type: "string", enum: ["register", "unregister", "busy", "idle"], description: "Action to perform (default: register)"},
             token:       {type: "string", description: "Secret token to protect your mailbox (optional, you choose it)"},
             name:        {type: "string", description: "Display name for the directory"},
             description: {type: "string", description: "What you do (for the directory)"},
@@ -133,18 +105,6 @@ module Arcana
             token:      {type: "string", description: "Your mailbox token (if set during register)"},
             timeout_ms: {type: "integer", description: "How long to wait for a message if mailbox is empty (0 = don't wait, default: 0)"},
             id:         {type: "string", description: "Correlation ID of a specific message to receive (from arcana_inbox). Only that message is consumed."},
-          },
-          required: ["address"],
-        },
-      },
-      {
-        name:        "arcana_unregister",
-        description: "Unregister from the Arcana bus. Removes your mailbox and directory listing. Messages in flight are lost.",
-        inputSchema: {
-          type:       "object",
-          properties: {
-            address: {type: "string", description: "The address to unregister"},
-            token:   {type: "string", description: "Your mailbox token (if set during register)"},
           },
           required: ["address"],
         },
@@ -277,16 +237,10 @@ module Arcana
         call_directory(args)
       when "arcana_deliver"
         call_deliver(args)
-      when "arcana_request"
-        call_request(args)
-      when "arcana_send"
-        call_send(args)
       when "arcana_publish"
         call_publish(args)
       when "arcana_register"
         call_register(args)
-      when "arcana_unregister"
-        call_unregister(args)
       when "arcana_inbox"
         call_inbox(args)
       when "arcana_receive"
@@ -319,7 +273,7 @@ module Arcana
     end
 
     private def call_deliver(args : JSON::Any) : String
-      ordering = args["ordering"]?.try(&.as_s?) || "async"
+      ordering = args["ordering"]?.try(&.as_s?) || "auto"
       body = {
         from:       args["from"]?.try(&.as_s?) || "mcp-bridge",
         to:         args["to"]?.try(&.as_s?) || "",
@@ -329,27 +283,6 @@ module Arcana
         timeout_ms: args["timeout_ms"]?.try(&.as_i?) || 30_000,
       }.to_json
       http_post("/deliver", body)
-    end
-
-    private def call_request(args : JSON::Any) : String
-      body = {
-        from:       args["from"]?.try(&.as_s?) || "mcp-bridge",
-        to:         args["to"]?.try(&.as_s?) || "",
-        subject:    args["subject"]?.try(&.as_s?) || "",
-        payload:    args["payload"]? || JSON::Any.new(nil),
-        timeout_ms: args["timeout_ms"]?.try(&.as_i?) || 30_000,
-      }.to_json
-      http_post("/request", body)
-    end
-
-    private def call_send(args : JSON::Any) : String
-      body = {
-        from:    args["from"]?.try(&.as_s?) || "mcp-bridge",
-        to:      args["to"]?.try(&.as_s?) || "",
-        subject: args["subject"]?.try(&.as_s?) || "",
-        payload: args["payload"]? || JSON::Any.new(nil),
-      }.to_json
-      http_post("/send", body)
     end
 
     private def call_publish(args : JSON::Any) : String
@@ -364,40 +297,48 @@ module Arcana
 
     private def call_register(args : JSON::Any) : String
       address = args["address"]?.try(&.as_s?) || ""
-      body = {
-        address:     address,
-        token:       args["token"]?.try(&.as_s?),
-        name:        args["name"]?.try(&.as_s?),
-        description: args["description"]?.try(&.as_s?),
-        kind:        args["kind"]?.try(&.as_s?),
-        guide:       args["guide"]?.try(&.as_s?),
-        tags:        args["tags"]?,
-      }.to_json
-      result = http_post("/register", body)
+      action = args["action"]?.try(&.as_s?) || "register"
 
-      # Track address for resource listing + notify client of new resource
-      unless @registered.includes?(address)
-        @registered << address
-        emit_notification("notifications/resources/list_changed")
+      case action
+      when "unregister"
+        body = {
+          address: address,
+          token:   args["token"]?.try(&.as_s?),
+        }.to_json
+        result = http_post("/unregister", body)
+
+        if @registered.delete(address)
+          @sub_mutex.synchronize { @subscriptions.delete(address) }
+          emit_notification("notifications/resources/list_changed")
+        end
+
+        result
+      when "busy"
+        body = {address: address, token: args["token"]?.try(&.as_s?), busy: true}.to_json
+        http_post("/busy", body)
+      when "idle"
+        body = {address: address, token: args["token"]?.try(&.as_s?), busy: false}.to_json
+        http_post("/busy", body)
+      else # "register"
+        body = {
+          address:     address,
+          token:       args["token"]?.try(&.as_s?),
+          name:        args["name"]?.try(&.as_s?),
+          description: args["description"]?.try(&.as_s?),
+          kind:        args["kind"]?.try(&.as_s?),
+          guide:       args["guide"]?.try(&.as_s?),
+          tags:        args["tags"]?,
+        }.to_json
+        result = http_post("/register", body)
+
+        # Track address for resource listing + notify client of new resource
+        unless @registered.includes?(address)
+          @registered << address
+          emit_notification("notifications/resources/list_changed")
+        end
+
+        result
       end
-
-      result
-    end
-
-    private def call_unregister(args : JSON::Any) : String
-      address = args["address"]?.try(&.as_s?) || ""
-      body = {
-        address: address,
-        token:   args["token"]?.try(&.as_s?),
-      }.to_json
-      result = http_post("/unregister", body)
-
-      if @registered.delete(address)
-        @sub_mutex.synchronize { @subscriptions.delete(address) }
-        emit_notification("notifications/resources/list_changed")
-      end
-
-      result
     end
 
     private def call_inbox(args : JSON::Any) : String

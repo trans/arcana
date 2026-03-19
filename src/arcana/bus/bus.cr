@@ -19,6 +19,7 @@ module Arcana
     @mailboxes = {} of String => Mailbox
     @subscriptions = {} of String => Set(String)
     @mutex = Mutex.new
+    property directory : Directory?
 
     # Get or create a mailbox for an address.
     def mailbox(address : String) : Mailbox
@@ -131,27 +132,40 @@ module Arcana
 
     # -- Unified delivery --
 
-    # Dispatch based on the envelope's ordering field.
-    # Sync: creates reply mailbox, sends, waits, returns response.
-    # Async: delivers and returns nil.
-    def deliver(envelope : Envelope, timeout : Time::Span = 30.seconds) : Envelope?
-      case envelope.ordering
+    # Resolve ordering: Auto looks up target kind in the directory.
+    # Service → Sync, Agent (or unknown) → Async.
+    def resolve_ordering(envelope : Envelope) : Ordering
+      return envelope.ordering unless envelope.ordering.auto?
+      if dir = @directory
+        if listing = dir.lookup(envelope.to)
+          return listing.kind.service? ? Ordering::Sync : Ordering::Async
+        end
+      end
+      Ordering::Async
+    end
+
+    # Dispatch based on the envelope's ordering field (auto-resolved).
+    # Returns {reply, resolved_ordering}. Reply is nil for async.
+    def deliver(envelope : Envelope, timeout : Time::Span = 30.seconds) : {Envelope?, Ordering}
+      resolved = resolve_ordering(envelope)
+      case resolved
       when Ordering::Sync
-        request(envelope, timeout: timeout)
+        {request(envelope, timeout: timeout), Ordering::Sync}
       else
         send(envelope)
-        nil
+        {nil, Ordering::Async}
       end
     end
 
     # Like deliver, but silently drops if the target mailbox doesn't exist.
-    def deliver?(envelope : Envelope, timeout : Time::Span = 30.seconds) : Envelope?
-      case envelope.ordering
+    def deliver?(envelope : Envelope, timeout : Time::Span = 30.seconds) : {Envelope?, Ordering}
+      resolved = resolve_ordering(envelope)
+      case resolved
       when Ordering::Sync
-        request(envelope, timeout: timeout)
+        {request(envelope, timeout: timeout), Ordering::Sync}
       else
         send?(envelope)
-        nil
+        {nil, Ordering::Async}
       end
     end
 

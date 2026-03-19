@@ -138,6 +138,9 @@ module Arcana
       when {"POST", "/frozen"}
         handle_post_frozen(ctx)
 
+      when {"POST", "/busy"}
+        handle_post_busy(ctx)
+
       when {"POST", "/peek"}
         handle_post_peek(ctx)
 
@@ -280,11 +283,11 @@ module Arcana
       timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
       timeout = timeout_ms.milliseconds
 
-      result = @bus.deliver?(envelope, timeout: timeout)
-      if result
-        ctx.response.print result.to_json
+      reply, resolved = @bus.deliver?(envelope, timeout: timeout)
+      if reply
+        ctx.response.print reply.to_json
       else
-        ctx.response.print %({"ok":true})
+        ctx.response.print %({"ok":true,"ordering":"#{resolved.to_s.downcase}","correlation_id":"#{envelope.correlation_id}"})
       end
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
@@ -398,6 +401,20 @@ module Arcana
       ctx.response.print %({"error":"#{ex.message}"})
     end
 
+    private def handle_post_busy(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed["address"]?.try(&.as_s?) || ""
+      raise "address required" if address.empty?
+      check_token!(address, parsed)
+
+      busy = parsed["busy"]?.try(&.as_bool?) || false
+      @directory.set_busy(address, busy)
+      ctx.response.print %({"ok":true,"address":"#{address}","busy":#{busy}})
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
     private def handle_post_peek(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
@@ -425,8 +442,9 @@ module Arcana
     private def envelope_from_json(parsed : JSON::Any) : Envelope
       env = parsed["envelope"]? || parsed
       ordering = case env["ordering"]?.try(&.as_s?)
-                 when "sync" then Ordering::Sync
-                 else             Ordering::Async
+                 when "sync"  then Ordering::Sync
+                 when "async" then Ordering::Async
+                 else              Ordering::Auto
                  end
       Envelope.new(
         from: env["from"]?.try(&.as_s?) || "",

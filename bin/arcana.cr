@@ -46,6 +46,7 @@ port = (ENV["ARCANA_PORT"]? || "4000").to_i
 
 bus = Arcana::Bus.new
 dir = Arcana::Directory.new
+bus.directory = dir
 
 # -- Register Arcana itself --
 
@@ -74,16 +75,14 @@ arcana_guide = <<-GUIDE
 
   Agents and services communicate via envelopes on the bus.
 
-  ### Sending Messages
+  ### Sending Messages (`arcana_deliver`)
 
-  **Async** (fire and forget — for agents):
-    Use `arcana_send` or `arcana_deliver` with ordering "async".
+  All message sending uses `arcana_deliver`. The `ordering` parameter controls behavior:
+  - **auto** (default) — the bus decides based on target kind: services get sync (blocks for reply), agents get async (fire and forget)
+  - **sync** — always block and wait for a reply
+  - **async** — always fire and forget (check `arcana_receive` later for replies)
 
-  **Sync** (block for reply — for services):
-    Use `arcana_request` or `arcana_deliver` with ordering "sync".
-
-  **Unified dispatch** (`arcana_deliver`):
-    Set `ordering` to "sync" or "async" on a single tool. This is the preferred approach when the ordering may vary.
+  The response tells you which mode was resolved and the correlation_id for tracking.
 
   ### Receiving Messages
 
@@ -113,6 +112,14 @@ arcana_guide = <<-GUIDE
   Subscribe to topics and publish broadcasts:
     `arcana_publish` sends to all subscribers of a topic.
 
+  ### Registration (`arcana_register`)
+
+  Manage your presence on the bus with a single tool:
+  - **register** (default) — create a mailbox and directory listing
+  - **unregister** — remove your mailbox and listing
+  - **busy** — mark yourself as busy (others see this in the directory)
+  - **idle** — mark yourself as available again
+
   ### Discovery
 
   **Directory** (`arcana_directory`): List all agents and services on the bus. Each listing shows address, name, description, kind (agent/service), busy status, and tags. Query by name, tag, or kind.
@@ -131,8 +138,8 @@ arcana_guide = <<-GUIDE
   ## Network
 
   WebSocket: ws://host:port/bus (real-time bidirectional)
-  REST: /send, /request, /deliver, /receive, /inbox, /publish, /directory, /health
-  MCP: 12 tools for full bus access from Claude Code or any MCP client
+  REST: /deliver, /receive, /inbox, /publish, /register, /unregister, /busy, /directory, /health
+  MCP: 9 tools for full bus access from Claude Code or any MCP client
 GUIDE
 
 # -- Built-in services --

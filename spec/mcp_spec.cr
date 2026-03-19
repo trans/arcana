@@ -12,12 +12,13 @@ describe Arcana::MCP do
     tools = Arcana::MCP::TOOLS
     names = tools.map { |t| t[:name] }
     names.should contain("arcana_directory")
-    names.should contain("arcana_request")
-    names.should contain("arcana_send")
+    names.should contain("arcana_deliver")
     names.should contain("arcana_publish")
     names.should contain("arcana_register")
-    names.should contain("arcana_unregister")
+    names.should contain("arcana_inbox")
     names.should contain("arcana_receive")
+    names.should contain("arcana_expect")
+    names.should contain("arcana_freeze")
     names.should contain("arcana_health")
   end
 
@@ -37,7 +38,7 @@ describe Arcana::MCP do
     response = mcp.test_handle(msg)
     response.should_not be_nil
     tools = response.not_nil!["result"]["tools"].as_a
-    tools.size.should eq(12)
+    tools.size.should eq(9)
   end
 
   it "returns nil for notifications" do
