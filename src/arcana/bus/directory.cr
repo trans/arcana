@@ -139,6 +139,44 @@ module Arcana
       end
     end
 
+    # Save all listings to a JSON file.
+    def save(path : String)
+      data = @mutex.synchronize do
+        JSON.build do |json|
+          json.array do
+            @listings.each_value { |l| l.to_json(json) }
+          end
+        end
+      end
+      File.write(path, data)
+    end
+
+    # Load listings from a JSON file. Skips addresses already registered
+    # (so built-in services registered in code take precedence).
+    def load(path : String) : Int32
+      return 0 unless File.exists?(path)
+      parsed = JSON.parse(File.read(path))
+      count = 0
+      @mutex.synchronize do
+        parsed.as_a.each do |entry|
+          address = entry["address"].as_s
+          next if @listings.has_key?(address)
+          kind = entry["kind"]?.try(&.as_s?) == "service" ? Kind::Service : Kind::Agent
+          @listings[address] = Listing.new(
+            address: address,
+            name: entry["name"]?.try(&.as_s?) || address,
+            description: entry["description"]?.try(&.as_s?) || "",
+            kind: kind,
+            schema: entry["schema"]?,
+            guide: entry["guide"]?.try(&.as_s?),
+            tags: entry["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
+          )
+          count += 1
+        end
+      end
+      count
+    end
+
     private def listing_to_json(l : Listing, json : JSON::Builder) : Nil
       json.object do
         json.field "address", l.address

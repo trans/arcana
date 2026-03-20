@@ -168,4 +168,84 @@ describe Arcana::Directory do
       parsed[0]["tags"].as_a.map(&.as_s).should eq(["tag1"])
     end
   end
+
+  describe "save/load" do
+    it "saves and loads listings" do
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "agent1", name: "Agent One", description: "does stuff",
+        kind: Arcana::Directory::Kind::Agent, tags: ["ai", "test"],
+      ))
+      dir.register(Arcana::Directory::Listing.new(
+        address: "svc1", name: "Service One", description: "serves",
+        kind: Arcana::Directory::Kind::Service,
+        guide: "Send anything",
+      ))
+
+      path = File.tempname("arcana-dir", ".json")
+      begin
+        dir.save(path)
+
+        dir2 = Arcana::Directory.new
+        count = dir2.load(path)
+        count.should eq(2)
+        dir2.list.size.should eq(2)
+
+        agent = dir2.lookup("agent1")
+        agent.should_not be_nil
+        agent.not_nil!.name.should eq("Agent One")
+        agent.not_nil!.kind.should eq(Arcana::Directory::Kind::Agent)
+        agent.not_nil!.tags.should eq(["ai", "test"])
+
+        svc = dir2.lookup("svc1")
+        svc.should_not be_nil
+        svc.not_nil!.kind.should eq(Arcana::Directory::Kind::Service)
+        svc.not_nil!.guide.should eq("Send anything")
+      ensure
+        File.delete(path) if File.exists?(path)
+      end
+    end
+
+    it "skips addresses already registered" do
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "builtin", name: "Built-in", description: "original",
+        kind: Arcana::Directory::Kind::Service,
+      ))
+
+      # Save a file with a conflicting address
+      dir2 = Arcana::Directory.new
+      dir2.register(Arcana::Directory::Listing.new(
+        address: "builtin", name: "Persisted", description: "should be skipped",
+        kind: Arcana::Directory::Kind::Agent,
+      ))
+      dir2.register(Arcana::Directory::Listing.new(
+        address: "external", name: "External", description: "should load",
+        kind: Arcana::Directory::Kind::Agent,
+      ))
+
+      path = File.tempname("arcana-dir", ".json")
+      begin
+        dir2.save(path)
+
+        count = dir.load(path)
+        count.should eq(1) # only "external" loaded
+        dir.list.size.should eq(2)
+
+        # Built-in should keep original values
+        dir.lookup("builtin").not_nil!.name.should eq("Built-in")
+        dir.lookup("builtin").not_nil!.kind.should eq(Arcana::Directory::Kind::Service)
+
+        # External should be loaded
+        dir.lookup("external").not_nil!.name.should eq("External")
+      ensure
+        File.delete(path) if File.exists?(path)
+      end
+    end
+
+    it "returns 0 when file doesn't exist" do
+      dir = Arcana::Directory.new
+      dir.load("/nonexistent/path.json").should eq(0)
+    end
+  end
 end

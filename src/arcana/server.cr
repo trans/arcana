@@ -24,11 +24,14 @@ module Arcana
     # exposed beyond localhost.
     @tokens = {} of String => String
 
+    property state_file : String?
+
     def initialize(
       @bus : Bus,
       @directory : Directory,
       @host : String = "0.0.0.0",
       @port : Int32 = 4000,
+      @state_file : String? = nil,
     )
     end
 
@@ -56,6 +59,12 @@ module Arcana
     def start_in_background
       spawn { start }
       sleep 50.milliseconds # let the server bind
+    end
+
+    private def save_state
+      if path = @state_file
+        @directory.save(path)
+      end
     end
 
     private def check_token!(address : String, parsed : JSON::Any)
@@ -174,6 +183,7 @@ module Arcana
           guide: parsed["guide"]?.try(&.as_s?),
           tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
         ))
+        save_state
       end
 
       ctx.response.print %({"ok":true,"address":"#{address}"})
@@ -191,6 +201,7 @@ module Arcana
       @directory.unregister(address)
       @bus.remove_mailbox(address)
       @tokens.delete(address)
+      save_state
 
       ctx.response.print %({"ok":true,"address":"#{address}"})
     rescue ex

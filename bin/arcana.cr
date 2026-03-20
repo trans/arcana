@@ -19,16 +19,20 @@ when "help", "--help", "-h"
   STDERR.puts <<-HELP
   Arcana v#{Arcana::VERSION} — AI communication bus
 
-  Usage: arcana [command]
+  Usage: arcana [command] [options]
 
   Commands:
     serve   Start the Arcana server (default)
     init    Set up a project for the bus
     version Show version
 
+  Options:
+    --fresh  Start with empty state (ignore persisted registrations)
+
   Environment:
-    ARCANA_HOST  Server host (default: 127.0.0.1)
-    ARCANA_PORT  Server port (default: 4000)
+    ARCANA_HOST       Server host (default: 127.0.0.1)
+    ARCANA_PORT       Server port (default: 4000)
+    ARCANA_STATE_DIR  State directory (default: ~/.arcana)
   HELP
   exit 0
 when "serve"
@@ -41,8 +45,14 @@ end
 
 # -- Server startup --
 
+fresh = ARGV.includes?("--fresh")
+
 host = ENV["ARCANA_HOST"]? || "127.0.0.1"
 port = (ENV["ARCANA_PORT"]? || "4000").to_i
+state_dir = ENV["ARCANA_STATE_DIR"]? || File.join(Path.home, ".arcana")
+state_file = File.join(state_dir, "directory.json")
+
+Dir.mkdir_p(state_dir) unless Dir.exists?(state_dir)
 
 bus = Arcana::Bus.new
 dir = Arcana::Directory.new
@@ -614,13 +624,26 @@ elsif agent_address = ENV["ARCANA_AGENT_ADDRESS"]?
   agents << agent_address
 end
 
+# -- Restore persisted registrations --
+
+restored = 0
+unless fresh
+  restored = dir.load(state_file)
+  # Create mailboxes for restored listings
+  dir.list.each do |listing|
+    bus.mailbox(listing.address) unless bus.has_mailbox?(listing.address)
+  end
+end
+
 STDERR.puts "Arcana v#{Arcana::VERSION} starting on #{host}:#{port}"
 STDERR.puts "  WebSocket: ws://#{host}:#{port}/bus"
 STDERR.puts "  REST:      http://#{host}:#{port}/directory"
 STDERR.puts "  Health:    http://#{host}:#{port}/health"
 STDERR.puts "  Services:  #{services.join(", ")}"
 STDERR.puts "  Agents:    #{agents.empty? ? "(none)" : agents.join(", ")}"
+STDERR.puts "  Restored:  #{restored} listings" if restored > 0
 STDERR.puts "  Directory: #{dir.list.size} listings"
+STDERR.puts "  State:     #{state_file}"
 
-server = Arcana::Server.new(bus, dir, host: host, port: port)
+server = Arcana::Server.new(bus, dir, host: host, port: port, state_file: state_file)
 server.start
