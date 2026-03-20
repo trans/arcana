@@ -30,6 +30,27 @@ describe Arcana::Bus do
     bus.has_mailbox?("temp").should be_false
   end
 
+  it "uses custom mailbox factory" do
+    custom_called = false
+    bus = Arcana::Bus.new
+    bus.mailbox_factory = ->(address : String) do
+      custom_called = true
+      Arcana::Mailbox.new(address).as(Arcana::Mailbox)
+    end
+
+    bus.mailbox("test")
+    custom_called.should be_true
+  end
+
+  it "custom factory mailboxes work for send/receive" do
+    bus = Arcana::Bus.new
+    bus.mailbox_factory = ->(address : String) { Arcana::Mailbox.new(address).as(Arcana::Mailbox) }
+
+    receiver = bus.mailbox("bob")
+    bus.send(Arcana::Envelope.new(from: "alice", to: "bob", subject: "hi"))
+    receiver.try_receive.not_nil!.subject.should eq("hi")
+  end
+
   describe "#send" do
     it "delivers to the target mailbox" do
       bus = Arcana::Bus.new

@@ -63,8 +63,12 @@ module Arcana
     end
 
     # Mark an address as busy or idle.
+    # Raises if the address has no directory listing.
     def set_busy(address : String, busy : Bool = true)
-      @mutex.synchronize { @busy[address] = busy }
+      @mutex.synchronize do
+        raise "no directory listing for '#{address}'" unless @listings.has_key?(address)
+        @busy[address] = busy
+      end
     end
 
     # Check if an address is currently busy.

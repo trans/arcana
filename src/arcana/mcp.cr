@@ -97,7 +97,7 @@ module Arcana
       },
       {
         name:        "arcana_receive",
-        description: "Check your mailbox for incoming messages. Returns an array of envelopes. Use timeout_ms to wait for messages if the mailbox is empty. Use id to selectively receive a specific message (from arcana_inbox) without consuming the rest.",
+        description: "Check your mailbox for incoming messages. Returns an array of envelopes. Use timeout_ms to wait for messages if the mailbox is empty. Use id to selectively receive a specific message (from arcana_inbox) without consuming the rest. Combine id + timeout_ms to block until a specific message arrives.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -357,9 +357,9 @@ module Arcana
       end
       if id = args["id"]?.try(&.as_s?)
         h["id"] = JSON::Any.new(id)
-      else
-        h["timeout_ms"] = JSON::Any.new(args["timeout_ms"]?.try(&.as_i64?) || 0_i64)
       end
+      timeout_ms = args["timeout_ms"]?.try(&.as_i64?) || 0_i64
+      h["timeout_ms"] = JSON::Any.new(timeout_ms) if timeout_ms > 0 || !id
       http_post("/receive", h.to_json)
     end
 

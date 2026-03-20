@@ -16,15 +16,18 @@ module Arcana
   #   bus.publish("image:ready", Envelope.new(from: "artist", payload: ...))
   #
   class Bus
+    alias MailboxFactory = Proc(String, Mailbox)
+
     @mailboxes = {} of String => Mailbox
     @subscriptions = {} of String => Set(String)
     @mutex = Mutex.new
     property directory : Directory?
+    property mailbox_factory : MailboxFactory = ->(address : String) { Mailbox.new(address).as(Mailbox) }
 
     # Get or create a mailbox for an address.
     def mailbox(address : String) : Mailbox
       @mutex.synchronize do
-        @mailboxes[address] ||= Mailbox.new(address)
+        @mailboxes[address] ||= @mailbox_factory.call(address)
       end
     end
 

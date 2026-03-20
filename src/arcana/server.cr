@@ -227,9 +227,14 @@ module Arcana
 
       mb = @bus.mailbox(address)
 
-      # Selective receive by id
+      # Selective receive by id (with optional timeout)
       if id = parsed["id"]?.try(&.as_s?)
-        msg = mb.receive(id)
+        timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 0
+        msg = if timeout_ms > 0
+                mb.receive(id, timeout_ms.milliseconds)
+              else
+                mb.receive(id)
+              end
         if msg
           ctx.response.print [msg].to_json
         else

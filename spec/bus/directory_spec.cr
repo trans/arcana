@@ -134,6 +134,13 @@ describe Arcana::Directory do
       dir.busy?("a").should be_false
     end
 
+    it "raises when setting busy on address without listing" do
+      dir = Arcana::Directory.new
+      expect_raises(Exception, "no directory listing for 'ghost'") do
+        dir.set_busy("ghost", true)
+      end
+    end
+
     it "includes busy in JSON output" do
       dir = Arcana::Directory.new
       dir.register(Arcana::Directory::Listing.new(

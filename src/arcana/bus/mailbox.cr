@@ -85,6 +85,24 @@ module Arcana
       env
     end
 
+    # Block until a specific message (by correlation_id) arrives or timeout expires.
+    # Returns nil on timeout.
+    def receive(id : String, timeout : Time::Span) : Envelope?
+      deadline = Time.instant + timeout
+      loop do
+        env = receive(id)
+        return env if env
+        remaining = deadline - Time.instant
+        return nil if remaining <= Time::Span.zero
+        select
+        when @signal.receive
+          # woken up, loop back to check for our specific message
+        when timeout(remaining)
+          return receive(id) # one last try
+        end
+      end
+    end
+
     # Non-blocking receive. Returns nil if empty.
     def try_receive : Envelope?
       env = @mutex.synchronize { @messages.shift? }

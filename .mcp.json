@@ -2,7 +2,7 @@
   "mcpServers": {
     "arcana": {
       "type": "stdio",
-      "command": "/home/trans/Projects/infocomics/arcana/bin/arcana-mcp",
+      "command": "/home/trans/Projects/arcana/bin/arcana-mcp",
       "env": {
         "ARCANA_URL": "http://127.0.0.1:4000"
       }

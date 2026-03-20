@@ -96,6 +96,44 @@ describe Arcana::Mailbox do
     end
   end
 
+  describe "#receive(id, timeout)" do
+    it "returns immediately if message already present" do
+      mb = Arcana::Mailbox.new("test")
+      mb.deliver(Arcana::Envelope.new(from: "a", subject: "waiting", correlation_id: "id-1"))
+
+      msg = mb.receive("id-1", 1.second)
+      msg.should_not be_nil
+      msg.not_nil!.subject.should eq("waiting")
+      mb.pending.should eq(0)
+    end
+
+    it "returns nil on timeout when message never arrives" do
+      mb = Arcana::Mailbox.new("test")
+      msg = mb.receive("id-1", 10.milliseconds)
+      msg.should be_nil
+    end
+
+    it "blocks until specific message arrives" do
+      mb = Arcana::Mailbox.new("test")
+
+      spawn do
+        sleep 5.milliseconds
+        # Deliver a different message first
+        mb.deliver(Arcana::Envelope.new(from: "a", subject: "other", correlation_id: "id-other"))
+        sleep 5.milliseconds
+        # Then deliver the one we're waiting for
+        mb.deliver(Arcana::Envelope.new(from: "b", subject: "target", correlation_id: "id-target"))
+      end
+
+      msg = mb.receive("id-target", 1.second)
+      msg.should_not be_nil
+      msg.not_nil!.subject.should eq("target")
+      # The other message should still be in the queue
+      mb.pending.should eq(1)
+      mb.try_receive.not_nil!.subject.should eq("other")
+    end
+  end
+
   describe "expected response tracking" do
     it "starts with zero outstanding" do
       mb = Arcana::Mailbox.new("test")
