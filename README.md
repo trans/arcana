@@ -60,6 +60,17 @@ provider = Arcana::Chat::Anthropic.new(
 )
 ```
 
+**Gemini** — Google's native Gemini API.
+
+```crystal
+provider = Arcana::Chat::Gemini.new(
+  api_key: ENV["GOOGLE_API_KEY"],
+  model:   "gemini-2.5-flash",
+)
+```
+
+**Grok** and **DeepSeek** are available as OpenAI-compatible endpoints via the Registry (see below).
+
 ### Messages and History
 
 Messages are role-tagged (`system`, `user`, `assistant`, `tool`). `History`
@@ -253,6 +264,17 @@ result.dimensions       # => 1536
 result.total_tokens     # => token count
 ```
 
+## Markdown
+
+Convert LLM markdown responses to HTML or ANSI terminal output.
+
+```crystal
+html = Arcana::Markdown.to_html("# Hello\n\n**bold** text")
+ansi = Arcana::Markdown.to_ansi("# Hello\n\n**bold** text")
+```
+
+Also available as the `markdown` bus service.
+
 ## Provider Registry
 
 Create providers by name without knowing the concrete class:
@@ -262,7 +284,7 @@ chat = Arcana::Registry.create_chat("anthropic", {"api_key" => JSON::Any.new(key
 img  = Arcana::Registry.create_image("runware", {"api_key" => JSON::Any.new(key)})
 ```
 
-Built-in: `openai` (chat/image/tts/embed), `anthropic` (chat), `runware` (image).
+Built-in: `openai` (chat/image/tts/embed), `anthropic` (chat), `gemini` (chat), `grok` (chat, xAI), `deepseek` (chat), `runware` (image), `voyage` (embed).
 
 Register your own:
 
@@ -277,19 +299,69 @@ pub/sub fan-out, and request/response patterns.
 
 ```crystal
 bus = Arcana::Bus.new
+dir = Arcana::Directory.new
+bus.directory = dir
+
 writer = bus.mailbox("writer")
 artist = bus.mailbox("artist")
 
-# Direct message
-bus.send(Arcana::Envelope.new(from: "writer", to: "artist", subject: "generate", payload: data))
+# Unified delivery — ordering resolved automatically
+# Services → sync (blocks for reply), Agents → async (fire and forget)
+reply, ordering = bus.deliver(envelope)
+
+# Or explicitly control ordering
+bus.deliver(envelope)                                    # auto (default)
+reply, _ = bus.deliver(envelope, timeout: 5.seconds)     # sync with timeout
+bus.send(envelope)                                       # direct async
 
 # Pub/sub
 bus.subscribe("image:ready", "writer")
 bus.publish("image:ready", envelope)
-
-# Request/response (blocks until reply or timeout)
-reply = bus.request(envelope, timeout: 5.seconds)
 ```
+
+### Ordering
+
+Envelopes carry an `ordering` field: `Auto` (default), `Sync`, or `Async`.
+
+- **Auto** — the bus resolves based on the target's directory kind: Service → Sync, Agent → Async
+- **Sync** — sender blocks until a reply arrives (or timeout)
+- **Async** — fire and forget, check the mailbox later
+
+### Mailbox Features
+
+```crystal
+mb = bus.mailbox("my-agent")
+
+# Non-destructive peek
+mb.inbox                          # => [{correlation_id, from, subject, timestamp}, ...]
+
+# Selective receive by correlation_id
+mb.receive("specific-id")         # non-blocking, returns nil if not found
+mb.receive("specific-id", 5.seconds)  # blocks until that message arrives or timeout
+
+# Freeze/thaw — hold messages out of the receive queue
+mb.freeze("msg-id", "reason")     # move to frozen storage
+mb.thaw("msg-id")                 # release back to queue
+mb.thaw_all                       # release all frozen messages
+mb.frozen                         # list frozen message metadata
+
+# Expected response tracking
+mb.expect("correlation-id")       # register an expectation
+mb.outstanding                    # count unfulfilled expectations
+mb.await_outstanding(10.seconds)  # block until all met or timeout
+```
+
+### Custom Mailbox
+
+Inject a custom mailbox factory for persistence or other extensions:
+
+```crystal
+bus.mailbox_factory = ->(address : String) {
+  MyPersistentMailbox.new(address).as(Arcana::Mailbox)
+}
+```
+
+Override the lifecycle hooks: `on_deliver`, `on_consume`, `on_freeze`, `on_thaw`.
 
 ### Directory
 
@@ -306,10 +378,18 @@ dir.register(Arcana::Directory::Listing.new(
   tags: ["ai", "helper"],
 ))
 
-dir.search("helper")     # search by name/description/tags
-dir.by_tag("ai")         # filter by tag
-dir.by_kind(Kind::Agent)  # filter by kind
+dir.search("helper")          # search by name/description/tags
+dir.by_tag("ai")              # filter by tag
+dir.by_kind(Kind::Agent)      # filter by kind
+dir.lookup("my-agent")        # direct lookup
+
+# Busy status
+dir.set_busy("my-agent", true)
+dir.busy?("my-agent")         # => true
 ```
+
+Directory listings persist across server restarts (saved to `~/.arcana/directory.json`).
+Built-in services registered in code always take precedence over persisted state.
 
 ### Services
 
@@ -364,16 +444,27 @@ Strategies: `OneForOne` (restart failed actor) or `OneForAll` (restart all on fa
 WebSocket + REST gateway that bridges remote agents to the local bus:
 
 ```crystal
-server = Arcana::Server.new(bus, dir, host: "127.0.0.1", port: 4000)
+server = Arcana::Server.new(bus, dir, host: "127.0.0.1", port: 4000,
+  state_file: "~/.arcana/directory.json")
 server.start  # blocking
 ```
 
 - **WebSocket** `ws://host:port/bus` — full bus participation
-- **REST** `GET /directory` — query the directory
 - **REST** `GET /health` — health check
-- **REST** `POST /send`, `/request`, `/publish` — messaging
+- **REST** `GET /directory` — query the directory (supports `?q=`, `?tag=`, `?kind=`)
+- **REST** `GET /directory/:address` — lookup a specific listing
+- **REST** `POST /deliver` — unified send with ordering (auto/sync/async)
+- **REST** `POST /publish` — topic broadcast
 - **REST** `POST /register` — create a mailbox + directory listing
-- **REST** `POST /receive` — poll a mailbox for messages
+- **REST** `POST /unregister` — remove a mailbox + listing
+- **REST** `POST /busy` — update busy/idle status
+- **REST** `POST /inbox` — non-destructive message listing
+- **REST** `POST /receive` — consume messages (supports selective by id + timeout)
+- **REST** `POST /outstanding` — check expected response count
+- **REST** `POST /await` — block until all expectations met
+- **REST** `POST /freeze` — freeze a message by id
+- **REST** `POST /thaw` — thaw a frozen message (or all)
+- **REST** `POST /frozen` — list frozen messages
 
 ## MCP Bridge
 
@@ -391,20 +482,46 @@ Connects Claude Code (or any MCP client) to the Arcana bus via stdio:
 }
 ```
 
-**Tools:** `arcana_directory`, `arcana_request`, `arcana_send`, `arcana_publish`, `arcana_register`, `arcana_receive`, `arcana_health`
+**9 tools:**
+
+| Tool | Description |
+|---|---|
+| `arcana_directory` | Search/filter/lookup directory listings |
+| `arcana_deliver` | Unified send with ordering (auto/sync/async) |
+| `arcana_publish` | Broadcast to topic subscribers |
+| `arcana_register` | Register/unregister/busy/idle (merged) |
+| `arcana_inbox` | Non-destructive message listing |
+| `arcana_receive` | Consume messages (selective by id, with timeout) |
+| `arcana_expect` | Check/await outstanding response expectations |
+| `arcana_freeze` | Freeze/thaw/thaw_all/list frozen messages |
+| `arcana_health` | Server health check |
 
 ## Running
 
 ```
 just build    # compile server + MCP bridge
-just serve    # start the server
+just serve    # start the server (port 4000)
 just test     # run specs
 just docs     # generate API docs
 ```
 
-Set environment variables for provider services:
+Use `--fresh` to start with empty state (ignore persisted registrations):
+
+```
+bin/arcana serve --fresh
+```
+
+### Environment Variables
+
+**Server:**
+- `ARCANA_HOST` — server host (default: `127.0.0.1`)
+- `ARCANA_PORT` — server port (default: `4000`)
+- `ARCANA_STATE_DIR` — state directory (default: `~/.arcana`)
+
+**Provider services** (registered when key is present):
 - `OPENAI_API_KEY` — enables chat:openai, embed:openai, tts:openai
 - `ANTHROPIC_API_KEY` — enables chat:anthropic
+- `GOOGLE_API_KEY` — enables chat:gemini
 - `RUNWARE_API_KEY` — enables image:runware
 
 ## License
