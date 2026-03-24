@@ -73,11 +73,21 @@ describe Arcana::Server do
     ) { |data| data }
     svc.start
 
+    # Register sender mailboxes
+    bus.mailbox("test-client")
+    bus.mailbox("test")
+
     server = Arcana::Server.new(bus, dir, port: 14001)
     server.start_in_background
 
     begin
       headers = HTTP::Headers{"Content-Type" => "application/json"}
+
+      # POST /send from unregistered sender — should be rejected
+      body = {from: "ghost", to: "echo", payload: "nope"}.to_json
+      resp = HTTP::Client.post("http://127.0.0.1:14001/send", headers: headers, body: body)
+      resp.status_code.should eq(400)
+      JSON.parse(resp.body)["error"].as_s.should contain("not registered")
 
       # POST /request — should get echo reply
       body = {

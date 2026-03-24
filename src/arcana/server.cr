@@ -61,6 +61,11 @@ module Arcana
       sleep 50.milliseconds # let the server bind
     end
 
+    private def check_sender!(from : String)
+      return if from.empty?
+      raise "sender '#{from}' is not registered" unless @bus.has_mailbox?(from)
+    end
+
     private def save_state
       if path = @state_file
         @directory.save(path)
@@ -282,6 +287,7 @@ module Arcana
     private def handle_post_send(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
       envelope = envelope_from_json(parsed)
+      check_sender!(envelope.from)
       if @bus.send?(envelope)
         ctx.response.print %({"ok":true})
       else
@@ -296,6 +302,7 @@ module Arcana
     private def handle_post_deliver(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
       envelope = envelope_from_json(parsed)
+      check_sender!(envelope.from)
       timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
       timeout = timeout_ms.milliseconds
 
@@ -448,6 +455,7 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       topic = parsed["topic"]?.try(&.as_s?) || ""
       envelope = envelope_from_json(parsed)
+      check_sender!(envelope.from)
       @bus.publish(topic, envelope)
       ctx.response.print %({"ok":true})
     rescue ex
