@@ -2,3 +2,4 @@ bin/arcana                     usr/bin/
 bin/arcana-mcp                  usr/bin/
 bin/arcana-init                 usr/bin/
 debian/arcana.env               etc/arcana/
+debian/secrets.env.example      usr/share/doc/arcana/

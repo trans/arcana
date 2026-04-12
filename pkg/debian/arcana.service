@@ -13,6 +13,7 @@ Group=arcana
 WorkingDirectory=/var/lib/arcana
 ExecStart=/usr/bin/arcana
 EnvironmentFile=-/etc/arcana/arcana.env
+EnvironmentFile=-/etc/arcana/secrets.env
 Environment=ARCANA_STATE_DIR=/var/lib/arcana
 UMask=007
 Restart=on-failure

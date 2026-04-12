@@ -1,6 +1,6 @@
 # Maintainer: trans <transfire@gmail.com>
 pkgname=arcana
-pkgver=0.12.0
+pkgver=0.12.1
 pkgrel=1
 pkgdesc="Agent communication bus and AI provider library"
 arch=('x86_64')
@@ -45,6 +45,10 @@ package() {
   # Default environment file
   install -Dm640 pkg/debian/arcana.env \
     "${pkgdir}/etc/arcana/arcana.env"
+
+  # Secrets example (documentation only — not installed to /etc)
+  install -Dm644 pkg/debian/secrets.env.example \
+    "${pkgdir}/usr/share/doc/arcana/secrets.env.example"
 
   # sysusers + tmpfiles for arcana user and state dir
   install -Dm644 /dev/stdin "${pkgdir}/usr/lib/sysusers.d/arcana.conf" <<'EOF'

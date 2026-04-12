@@ -16,10 +16,14 @@ case "$1" in
         chown -R arcana:arcana /var/lib/arcana
         chmod 750 /var/lib/arcana
 
-        # Secure the env file (contains API keys).
+        # Secure env files.
         if [ -f /etc/arcana/arcana.env ]; then
             chown root:arcana /etc/arcana/arcana.env
             chmod 640 /etc/arcana/arcana.env
+        fi
+        if [ -f /etc/arcana/secrets.env ]; then
+            chown root:arcana /etc/arcana/secrets.env
+            chmod 640 /etc/arcana/secrets.env
         fi
         ;;
 esac

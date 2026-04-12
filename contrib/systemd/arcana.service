@@ -16,6 +16,7 @@ ExecStart=/home/arcana/bin/arcana
 # Optional environment file (API keys, ARCANA_PORT overrides, etc.)
 # The leading "-" makes it optional — service starts even if file is missing.
 EnvironmentFile=-/home/arcana/.env
+EnvironmentFile=-/home/arcana/secrets.env
 
 # Pin state directory explicitly so it doesn't depend on $HOME being set.
 Environment=ARCANA_STATE_DIR=/home/arcana/.arcana
