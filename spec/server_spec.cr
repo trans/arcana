@@ -29,7 +29,7 @@ describe Arcana::Server do
       resp.status_code.should eq(200)
       listings = JSON.parse(resp.body).as_a
       listings.size.should eq(1)
-      listings[0]["address"].as_s.should eq("test-agent")
+      listings[0]["address"].as_s.should eq("test-agent:agent")
 
       # GET /directory?tag=test
       resp = HTTP::Client.get("http://127.0.0.1:14000/directory?tag=test")
@@ -100,7 +100,7 @@ describe Arcana::Server do
       resp = HTTP::Client.post("http://127.0.0.1:14001/request", headers: headers, body: body)
       resp.status_code.should eq(200)
       result = JSON.parse(resp.body)
-      result["from"].as_s.should eq("echo")
+      result["from"].as_s.should eq("echo:service")
 
       # POST /send — fire and forget
       body = {from: "test", to: "echo", payload: "fire"}.to_json

@@ -25,7 +25,7 @@ module Arcana
     def initialize(
       @bus : Bus,
       @directory : Directory,
-      @address : String,
+      address : String,
       @name : String,
       @description : String,
       @schema : JSON::Any? = nil,
@@ -33,6 +33,7 @@ module Arcana
       @tags : Array(String) = [] of String,
       &handler : JSON::Any -> JSON::Any
     )
+      @address = Directory.qualify(address, Directory::Kind::Service)
       @handler = handler
       @running = false
 

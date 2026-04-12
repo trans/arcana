@@ -31,7 +31,7 @@ when "help", "--help", "-h"
 
   Environment:
     ARCANA_HOST       Server host (default: 127.0.0.1)
-    ARCANA_PORT       Server port (default: 4000)
+    ARCANA_PORT       Server port (default: 19118)
     ARCANA_STATE_DIR  State directory (default: ~/.arcana)
   HELP
   exit 0
@@ -48,7 +48,7 @@ end
 fresh = ARGV.includes?("--fresh")
 
 host = ENV["ARCANA_HOST"]? || "127.0.0.1"
-port = (ENV["ARCANA_PORT"]? || "4000").to_i
+port = (ENV["ARCANA_PORT"]? || "19118").to_i
 state_dir = ENV["ARCANA_STATE_DIR"]? || File.join(Path.home, ".arcana")
 state_file = File.join(state_dir, "directory.json")
 
@@ -624,16 +624,45 @@ elsif agent_address = ENV["ARCANA_AGENT_ADDRESS"]?
   agents << agent_address
 end
 
-# -- Restore persisted registrations --
+# -- Construct server (needed before snapshot load for token restoration) --
+
+snapshot_file = File.join(state_dir, "state.json")
+server = Arcana::Server.new(bus, dir, host: host, port: port, state_file: state_file)
+
+# -- Restore persisted state --
 
 restored = 0
+restored_messages = 0
 unless fresh
-  restored = dir.load(state_file)
-  # Create mailboxes for restored listings
-  dir.list.each do |listing|
-    bus.mailbox(listing.address) unless bus.has_mailbox?(listing.address)
+  if Arcana::Snapshot.load(bus, dir, server, snapshot_file)
+    restored = dir.list.size
+    bus.addresses.each { |a| restored_messages += bus.pending(a) }
+  elsif File.exists?(state_file)
+    # Legacy migration: import old directory.json
+    restored = dir.load(state_file)
+    dir.list.each do |listing|
+      bus.mailbox(listing.address) unless bus.has_mailbox?(listing.address)
+    end
   end
 end
+
+# -- Shutdown handler: save snapshot on SIGTERM/SIGINT --
+
+shutdown = ->(sig : Signal) do
+  STDERR.puts "\nArcana shutting down — saving snapshot..."
+  begin
+    Arcana::Snapshot.save(bus, dir, server, snapshot_file)
+    msg_count = 0
+    bus.addresses.each { |a| msg_count += bus.pending(a) }
+    STDERR.puts "  Saved #{dir.list.size} listings, #{msg_count} pending messages to #{snapshot_file}"
+  rescue ex
+    STDERR.puts "  Snapshot save failed: #{ex.message}"
+  end
+  exit 0
+end
+
+Signal::INT.trap { shutdown.call(Signal::INT) }
+Signal::TERM.trap { shutdown.call(Signal::TERM) }
 
 STDERR.puts "Arcana v#{Arcana::VERSION} starting on #{host}:#{port}"
 STDERR.puts "  WebSocket: ws://#{host}:#{port}/bus"
@@ -641,9 +670,8 @@ STDERR.puts "  REST:      http://#{host}:#{port}/directory"
 STDERR.puts "  Health:    http://#{host}:#{port}/health"
 STDERR.puts "  Services:  #{services.join(", ")}"
 STDERR.puts "  Agents:    #{agents.empty? ? "(none)" : agents.join(", ")}"
-STDERR.puts "  Restored:  #{restored} listings" if restored > 0
+STDERR.puts "  Restored:  #{restored} listings, #{restored_messages} pending messages" if restored > 0
 STDERR.puts "  Directory: #{dir.list.size} listings"
-STDERR.puts "  State:     #{state_file}"
+STDERR.puts "  Snapshot:  #{snapshot_file}"
 
-server = Arcana::Server.new(bus, dir, host: host, port: port, state_file: state_file)
 server.start

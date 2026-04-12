@@ -1,0 +1,7 @@
+arcana (0.12.0-1) unstable; urgency=medium
+
+  * Initial package release
+  * Change default port from 4000 to 19118
+  * Add Arch Linux (PKGBUILD) and Debian packaging
+
+ -- trans <transfire@gmail.com>  Sat, 12 Apr 2026 00:00:00 +0000

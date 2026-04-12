@@ -12,7 +12,7 @@ module Arcana
   #
   #   bus = Arcana::Bus.new
   #   dir = Arcana::Directory.new
-  #   server = Arcana::Server.new(bus, dir, port: 4000)
+  #   server = Arcana::Server.new(bus, dir, port: 19118)
   #   server.start  # blocking
   #
   class Server
@@ -22,7 +22,13 @@ module Arcana
     # TODO: Revisit token auth — currently a simple shared secret per address.
     # Consider JWT, expiry, or key length requirements if Arcana is ever
     # exposed beyond localhost.
-    @tokens = {} of String => String
+    getter tokens = {} of String => String
+
+    # Bulk-replace tokens (used by snapshot restore).
+    def load_tokens(tokens : Hash(String, String))
+      @tokens.clear
+      tokens.each { |addr, tok| @tokens[addr] = tok }
+    end
 
     property state_file : String?
 
@@ -30,7 +36,7 @@ module Arcana
       @bus : Bus,
       @directory : Directory,
       @host : String = "0.0.0.0",
-      @port : Int32 = 4000,
+      @port : Int32 = 19118,
       @state_file : String? = nil,
     )
     end
@@ -63,7 +69,8 @@ module Arcana
 
     private def check_sender!(from : String)
       return if from.empty?
-      raise "sender '#{from}' is not registered" unless @bus.has_mailbox?(from)
+      resolved = @directory.resolve?(from) || from
+      raise "sender '#{from}' is not registered" unless @bus.has_mailbox?(resolved)
     end
 
     private def save_state
@@ -77,6 +84,12 @@ module Arcana
       return unless expected  # no token set = no auth required
       given = parsed["token"]?.try(&.as_s?) || ""
       raise "unauthorized" unless given == expected
+    end
+
+    # Resolve an address to its qualified form via the directory.
+    # Falls back to the raw address if no listing exists (e.g. reply mailboxes).
+    private def resolve_addr(address : String) : String
+      @directory.resolve?(address) || address
     end
 
     private def handle_rest(ctx : HTTP::Server::Context)
@@ -169,29 +182,30 @@ module Arcana
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
 
+      kind = parsed["kind"]?.try(&.as_s?) == "service" ? Directory::Kind::Service : Directory::Kind::Agent
+      qualified = Directory.qualify(address, kind)
+
       # Store token if provided (agent-chosen shared secret)
       if token = parsed["token"]?.try(&.as_s?)
-        @tokens[address] = token unless token.empty?
+        @tokens[qualified] = token unless token.empty?
       end
 
-      # Create mailbox so messages can be received
-      @bus.mailbox(address)
+      # Create mailbox with qualified address
+      @bus.mailbox(qualified)
 
-      # Register in directory if listing info provided
-      if parsed["name"]?
-        @directory.register(Directory::Listing.new(
-          address: address,
-          name: parsed["name"]?.try(&.as_s?) || address,
-          description: parsed["description"]?.try(&.as_s?) || "",
-          kind: parsed["kind"]?.try(&.as_s?) == "service" ? Directory::Kind::Service : Directory::Kind::Agent,
-          schema: parsed["schema"]?,
-          guide: parsed["guide"]?.try(&.as_s?),
-          tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
-        ))
-        save_state
-      end
+      # Register in directory
+      @directory.register(Directory::Listing.new(
+        address: address,
+        name: parsed["name"]?.try(&.as_s?) || Directory.bare_name(address),
+        description: parsed["description"]?.try(&.as_s?) || "",
+        kind: kind,
+        schema: parsed["schema"]?,
+        guide: parsed["guide"]?.try(&.as_s?),
+        tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
+      ))
+      save_state
 
-      ctx.response.print %({"ok":true,"address":"#{address}"})
+      ctx.response.print %({"ok":true,"address":"#{qualified}"})
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})
@@ -201,14 +215,16 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
-      check_token!(address, parsed)
 
-      @directory.unregister(address)
-      @bus.remove_mailbox(address)
-      @tokens.delete(address)
+      resolved = @directory.resolve?(address) || address
+      check_token!(resolved, parsed)
+
+      @directory.unregister(resolved)
+      @bus.remove_mailbox(resolved)
+      @tokens.delete(resolved)
       save_state
 
-      ctx.response.print %({"ok":true,"address":"#{address}"})
+      ctx.response.print %({"ok":true,"address":"#{resolved}"})
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})
@@ -218,13 +234,10 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
-      check_token!(address, parsed)
+      resolved = resolve_addr(address)
+      check_token!(resolved, parsed)
 
-      unless @bus.has_mailbox?(address)
-        @bus.mailbox(address)
-      end
-
-      mb = @bus.mailbox(address)
+      mb = @bus.mailbox(resolved)
       ctx.response.print mb.inbox.to_json
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
@@ -235,13 +248,10 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
-      check_token!(address, parsed)
+      resolved = resolve_addr(address)
+      check_token!(resolved, parsed)
 
-      unless @bus.has_mailbox?(address)
-        @bus.mailbox(address)
-      end
-
-      mb = @bus.mailbox(address)
+      mb = @bus.mailbox(resolved)
 
       # Selective receive by id (with optional timeout)
       if id = parsed["id"]?.try(&.as_s?)
@@ -339,10 +349,11 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
-      check_token!(address, parsed)
+      resolved = resolve_addr(address)
+      check_token!(resolved, parsed)
 
-      mb = @bus.mailbox(address)
-      ctx.response.print %({"address":"#{address}","outstanding":#{mb.outstanding}})
+      mb = @bus.mailbox(resolved)
+      ctx.response.print %({"address":"#{resolved}","outstanding":#{mb.outstanding}})
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})
@@ -352,12 +363,13 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
-      check_token!(address, parsed)
+      resolved = resolve_addr(address)
+      check_token!(resolved, parsed)
 
       timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
-      mb = @bus.mailbox(address)
+      mb = @bus.mailbox(resolved)
       all_met = mb.await_outstanding(timeout_ms.milliseconds)
-      ctx.response.print %({"address":"#{address}","all_met":#{all_met}})
+      ctx.response.print %({"address":"#{resolved}","all_met":#{all_met}})
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})
@@ -367,13 +379,14 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
-      check_token!(address, parsed)
+      resolved = resolve_addr(address)
+      check_token!(resolved, parsed)
 
       id = parsed["id"]?.try(&.as_s?) || ""
       raise "id required" if id.empty?
       by = parsed["by"]?.try(&.as_s?) || ""
 
-      mb = @bus.mailbox(address)
+      mb = @bus.mailbox(resolved)
       if mb.freeze(id, by)
         ctx.response.print %({"ok":true})
       else
@@ -389,16 +402,17 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
-      check_token!(address, parsed)
+      resolved = resolve_addr(address)
+      check_token!(resolved, parsed)
 
       if parsed["all"]?.try(&.as_bool?)
-        mb = @bus.mailbox(address)
+        mb = @bus.mailbox(resolved)
         count = mb.thaw_all
         ctx.response.print %({"ok":true,"thawed":#{count}})
       else
         id = parsed["id"]?.try(&.as_s?) || ""
         raise "id required" if id.empty?
-        mb = @bus.mailbox(address)
+        mb = @bus.mailbox(resolved)
         if mb.thaw(id)
           ctx.response.print %({"ok":true})
         else
@@ -415,9 +429,10 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
-      check_token!(address, parsed)
+      resolved = resolve_addr(address)
+      check_token!(resolved, parsed)
 
-      mb = @bus.mailbox(address)
+      mb = @bus.mailbox(resolved)
       ctx.response.print mb.frozen.to_json
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
@@ -428,11 +443,12 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
-      check_token!(address, parsed)
+      resolved = resolve_addr(address)
+      check_token!(resolved, parsed)
 
       busy = parsed["busy"]?.try(&.as_bool?) || false
-      @directory.set_busy(address, busy)
-      ctx.response.print %({"ok":true,"address":"#{address}","busy":#{busy}})
+      @directory.set_busy(resolved, busy)
+      ctx.response.print %({"ok":true,"address":"#{resolved}","busy":#{busy}})
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})
@@ -442,10 +458,11 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
-      check_token!(address, parsed)
+      resolved = resolve_addr(address)
+      check_token!(resolved, parsed)
 
-      count = @bus.pending(address)
-      ctx.response.print %|{"address":"#{address}","pending":#{count}}|
+      count = @bus.pending(resolved)
+      ctx.response.print %|{"address":"#{resolved}","pending":#{count}}|
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %|{"error":"#{ex.message}"}|
@@ -516,24 +533,29 @@ module Arcana
 
             case type
             when "join"
-              address = parsed["address"]?.try(&.as_s?)
-              next unless addr = address
+              raw_addr = parsed["address"]?.try(&.as_s?)
+              next unless raw = raw_addr
 
-              # Register remote agent on local bus
-              mailbox = @bus.mailbox(addr)
+              kind = parsed["kind"]?.try(&.as_s?) == "service" ? Directory::Kind::Service : Directory::Kind::Agent
+              qualified = Directory.qualify(raw, kind)
 
-              # Register in directory if listing info provided
-              if parsed["name"]?
+              # Register in directory unless already present (allows reconnection
+              # after restart when state was loaded from disk).
+              unless @directory.lookup(qualified)
                 @directory.register(Directory::Listing.new(
-                  address: addr,
-                  name: parsed["name"]?.try(&.as_s?) || addr,
+                  address: raw,
+                  name: parsed["name"]?.try(&.as_s?) || Directory.bare_name(raw),
                   description: parsed["description"]?.try(&.as_s?) || "",
-                  kind: parsed["kind"]?.try(&.as_s?) == "service" ? Directory::Kind::Service : Directory::Kind::Agent,
+                  kind: kind,
                   tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
                 ))
               end
 
-              @mutex.synchronize { @connections[addr] = ws }
+              # Create mailbox on local bus
+              mailbox = @bus.mailbox(qualified)
+              address = qualified
+
+              @mutex.synchronize { @connections[qualified] = ws }
 
               # Forward bus messages to WebSocket
               forwarder = spawn do

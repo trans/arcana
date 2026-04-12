@@ -26,7 +26,7 @@ module Arcana
     def initialize(
       @bus : Bus,
       @directory : Directory,
-      @address : String,
+      address : String,
       @name : String,
       @description : String,
       @kind : Directory::Kind = Directory::Kind::Agent,
@@ -34,6 +34,7 @@ module Arcana
       @guide : String? = nil,
       @tags : Array(String) = [] of String,
     )
+      @address = Directory.qualify(address, @kind)
       @mailbox = nil
     end
 

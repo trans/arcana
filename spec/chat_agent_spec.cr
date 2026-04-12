@@ -53,7 +53,7 @@ describe Arcana::ChatAgent do
     # Wait for the reply.
     reply = sender.receive(5.seconds)
     reply.should_not be_nil
-    reply.not_nil!.from.should eq("bot")
+    reply.not_nil!.from.should eq("bot:agent")
 
     payload = reply.not_nil!.payload
     msg = payload["message"]?.try(&.as_s?)

@@ -237,5 +237,28 @@ module Arcana
     protected def on_consume(envelope : Envelope); end
     protected def on_freeze(id : String, by : String); end
     protected def on_thaw(id : String); end
+
+    # -- Snapshot dump/load --
+
+    # Snapshot the mailbox's full state for persistence.
+    def dump : NamedTuple(messages: Array(Envelope), frozen: Hash(String, Envelope), frozen_by: Hash(String, String))
+      @mutex.synchronize do
+        {
+          messages:  @messages.to_a,
+          frozen:    @frozen.dup,
+          frozen_by: @frozen_by.dup,
+        }
+      end
+    end
+
+    # Restore mailbox state from a snapshot. Replaces existing state.
+    def load_snapshot(messages : Array(Envelope), frozen : Hash(String, Envelope), frozen_by : Hash(String, String))
+      @mutex.synchronize do
+        @messages.clear
+        messages.each { |env| @messages.push(env) }
+        @frozen = frozen.dup
+        @frozen_by = frozen_by.dup
+      end
+    end
   end
 end

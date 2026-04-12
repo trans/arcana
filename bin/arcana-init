@@ -48,7 +48,7 @@ cat > "$HOOKS_DIR/arcana-register.sh" << 'HOOK'
 
 address=$(basename "$CLAUDE_PROJECT_DIR")
 
-curl -sf http://127.0.0.1:4000/register \
+curl -sf http://127.0.0.1:19118/register \
   -H "Content-Type: application/json" \
   -d "{\"address\":\"$address\",\"kind\":\"agent\"}" \
   >/dev/null 2>&1
@@ -66,7 +66,7 @@ input=$(cat)
 address=$(basename "$CLAUDE_PROJECT_DIR")
 
 # Check for pending messages
-response=$(curl -sf http://127.0.0.1:4000/peek \
+response=$(curl -sf http://127.0.0.1:19118/peek \
   -H "Content-Type: application/json" \
   -d "{\"address\":\"$address\"}" 2>/dev/null)
 
@@ -97,7 +97,7 @@ cat > "$HOOKS_DIR/arcana-unregister.sh" << 'HOOK'
 
 address=$(basename "$CLAUDE_PROJECT_DIR")
 
-curl -sf http://127.0.0.1:4000/unregister \
+curl -sf http://127.0.0.1:19118/unregister \
   -H "Content-Type: application/json" \
   -d "{\"address\":\"$address\"}" \
   >/dev/null 2>&1
@@ -162,7 +162,7 @@ fi
 
 # --- 3. Write/merge .mcp.json ---
 
-ARCANA_MCP="{\"mcpServers\":{\"arcana\":{\"type\":\"stdio\",\"command\":\"$MCP_BIN\",\"env\":{\"ARCANA_URL\":\"http://127.0.0.1:4000\"}}}}"
+ARCANA_MCP="{\"mcpServers\":{\"arcana\":{\"type\":\"stdio\",\"command\":\"$MCP_BIN\",\"env\":{\"ARCANA_URL\":\"http://127.0.0.1:19118\"}}}}"
 
 MCP_FILE="$PROJECT_DIR/.mcp.json"
 if [ -f "$MCP_FILE" ]; then

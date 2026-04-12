@@ -14,7 +14,7 @@
 #   bin/ralph arcana 60 ~/Projects/memo  # run in a different project dir
 #
 # Environment:
-#   ARCANA_URL    — server URL (default: http://127.0.0.1:4000)
+#   ARCANA_URL    — server URL (default: http://127.0.0.1:19118)
 #   RALPH_PROMPT  — override the default prompt
 #   RALPH_BUDGET  — max spend per invocation (default: 0.50)
 #   RALPH_TOOLS   — allowed tools (default: all mcp__arcana__*)
@@ -25,7 +25,7 @@ set -euo pipefail
 ADDRESS="${1:?Usage: bin/ralph <address> [interval] [project_dir]}"
 INTERVAL="${2:-60}"
 PROJECT_DIR="${3:-.}"
-ARCANA_URL="${ARCANA_URL:-http://127.0.0.1:4000}"
+ARCANA_URL="${ARCANA_URL:-http://127.0.0.1:19118}"
 BUDGET="${RALPH_BUDGET:-0.50}"
 TOOLS="${RALPH_TOOLS:-mcp__arcana__arcana_receive,mcp__arcana__arcana_send,mcp__arcana__arcana_directory,mcp__arcana__arcana_register,mcp__arcana__arcana_request,mcp__arcana__arcana_publish,Bash,Read,Glob,Grep}"
 

@@ -2,18 +2,16 @@ module Arcana
   # Central message router for agent-to-agent communication.
   #
   # Supports direct delivery (send) and fan-out (publish/subscribe).
+  # Addresses are resolved through the directory when available —
+  # bare names like "memo" resolve to "memo:agent" or "memo:service"
+  # if unambiguous.
   #
   #   bus = Arcana::Bus.new
-  #   writer = bus.mailbox("writer")
-  #   artist = bus.mailbox("artist")
+  #   writer = bus.mailbox("writer:agent")
+  #   artist = bus.mailbox("artist:agent")
   #
-  #   bus.subscribe("image:ready", "writer")
-  #
-  #   # Direct message
-  #   bus.send(Envelope.new(from: "writer", to: "artist", subject: "generate", payload: ...))
-  #
-  #   # Topic broadcast
-  #   bus.publish("image:ready", Envelope.new(from: "artist", payload: ...))
+  #   # Direct message — bare name resolves if unambiguous
+  #   bus.send(Envelope.new(from: "writer:agent", to: "artist", ...))
   #
   class Bus
     alias MailboxFactory = Proc(String, Mailbox)
@@ -24,6 +22,39 @@ module Arcana
     property directory : Directory?
     property mailbox_factory : MailboxFactory = ->(address : String) { Mailbox.new(address).as(Mailbox) }
 
+    # Resolve an address. Strategy:
+    # 1. Try directory resolution (handles bare → qualified)
+    # 2. If raw address has a mailbox, use it
+    # 3. If a qualified form has a mailbox, use it (raises if ambiguous)
+    # 4. Fall back to raw address
+    def resolve_address(address : String) : String
+      if dir = @directory
+        if resolved = dir.resolve?(address)
+          return resolved
+        end
+      end
+
+      @mutex.synchronize do
+        return address if @mailboxes.has_key?(address)
+        return address if Directory.qualified?(address)
+
+        agent_key = "#{address}:agent"
+        service_key = "#{address}:service"
+        has_agent = @mailboxes.has_key?(agent_key)
+        has_service = @mailboxes.has_key?(service_key)
+
+        if has_agent && has_service
+          raise Error.new("Ambiguous address '#{address}' — use '#{agent_key}' or '#{service_key}'")
+        elsif has_agent
+          agent_key
+        elsif has_service
+          service_key
+        else
+          address
+        end
+      end
+    end
+
     # Get or create a mailbox for an address.
     def mailbox(address : String) : Mailbox
       @mutex.synchronize do
@@ -33,7 +64,8 @@ module Arcana
 
     # Does a mailbox exist for this address?
     def has_mailbox?(address : String) : Bool
-      @mutex.synchronize { @mailboxes.has_key?(address) }
+      resolved = resolve_address(address)
+      @mutex.synchronize { @mailboxes.has_key?(resolved) }
     end
 
     # Remove a mailbox. Messages in flight are lost.
@@ -48,7 +80,8 @@ module Arcana
 
     # Pending message count for an address. Returns 0 if no mailbox.
     def pending(address : String) : Int32
-      mb = @mutex.synchronize { @mailboxes[address]? }
+      resolved = resolve_address(address)
+      mb = @mutex.synchronize { @mailboxes[resolved]? }
       mb.try(&.pending) || 0
     end
 
@@ -56,14 +89,16 @@ module Arcana
 
     # Send an envelope to its `to` address.
     def send(envelope : Envelope)
-      mb = @mutex.synchronize { @mailboxes[envelope.to]? }
+      resolved = resolve_address(envelope.to)
+      mb = @mutex.synchronize { @mailboxes[resolved]? }
       raise Error.new("No mailbox for address: #{envelope.to}") unless mb
       mb.deliver(envelope)
     end
 
     # Send, but silently drop if the target mailbox doesn't exist.
     def send?(envelope : Envelope) : Bool
-      mb = @mutex.synchronize { @mailboxes[envelope.to]? }
+      resolved = resolve_address(envelope.to)
+      mb = @mutex.synchronize { @mailboxes[resolved]? }
       return false unless mb
       mb.deliver(envelope)
       true
@@ -73,7 +108,8 @@ module Arcana
     # Returns the correlation_id for tracking.
     def send_expecting(envelope : Envelope) : String
       if !envelope.from.empty?
-        from_mb = mailbox(envelope.from)
+        from_resolved = resolve_address(envelope.from)
+        from_mb = mailbox(from_resolved)
         from_mb.expect(envelope.correlation_id)
       end
       send(envelope)
@@ -140,7 +176,8 @@ module Arcana
     def resolve_ordering(envelope : Envelope) : Ordering
       return envelope.ordering unless envelope.ordering.auto?
       if dir = @directory
-        if listing = dir.lookup(envelope.to)
+        resolved = dir.resolve?(envelope.to)
+        if resolved && (listing = dir.lookup(resolved))
           return listing.kind.service? ? Ordering::Sync : Ordering::Async
         end
       end

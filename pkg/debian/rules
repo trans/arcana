@@ -1,0 +1,20 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	shards install --production
+	crystal build --release --no-debug bin/arcana.cr -o bin/arcana
+	crystal build --release --no-debug bin/arcana-mcp.cr -o bin/arcana-mcp
+
+override_dh_auto_install:
+	dh_auto_install
+	# License
+	install -Dm644 LICENSE $(CURDIR)/debian/arcana/usr/share/doc/arcana/copyright
+
+override_dh_auto_test:
+	true
+
+override_dh_installsystemd:
+	dh_installsystemd --name=arcana --no-enable --no-start

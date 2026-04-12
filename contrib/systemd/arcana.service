@@ -1,0 +1,51 @@
+[Unit]
+Description=Arcana agent communication bus
+Documentation=https://github.com/trans/arcana
+After=network.target
+Wants=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=arcana
+Group=arcana
+WorkingDirectory=/home/arcana
+ExecStart=/home/arcana/bin/arcana
+
+# Optional environment file (API keys, ARCANA_PORT overrides, etc.)
+# The leading "-" makes it optional — service starts even if file is missing.
+EnvironmentFile=-/home/arcana/.env
+
+# Pin state directory explicitly so it doesn't depend on $HOME being set.
+Environment=ARCANA_STATE_DIR=/home/arcana/.arcana
+
+# Files created by the service are group-readable so trans (in arcana group)
+# can inspect state, edit .env, etc. without sudo.
+UMask=002
+
+# Restart on crash, but back off so we don't spin on a broken binary.
+# (StartLimitIntervalSec/StartLimitBurst are in [Unit] above.)
+Restart=on-failure
+RestartSec=5
+
+# Graceful shutdown: SIGTERM triggers the snapshot save handler in bin/arcana.cr.
+# 15s is plenty for the JSON write even with thousands of pending messages.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Hardening — sensible defaults for a long-running service.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/arcana
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

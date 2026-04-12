@@ -85,7 +85,7 @@ describe Arcana::Directory do
       ))
 
       dir.search("image").size.should eq(1)
-      dir.search("image").first.address.should eq("a")
+      dir.search("image").first.address.should eq("a:agent")
       dir.search("convert").size.should eq(1)
       dir.search("creative").size.should eq(1)
       dir.search("nonexistent").size.should eq(0)
@@ -136,7 +136,7 @@ describe Arcana::Directory do
 
     it "raises when setting busy on address without listing" do
       dir = Arcana::Directory.new
-      expect_raises(Exception, "no directory listing for 'ghost'") do
+      expect_raises(Exception, "Address not found: ghost") do
         dir.set_busy("ghost", true)
       end
     end
@@ -163,7 +163,7 @@ describe Arcana::Directory do
 
       parsed = JSON.parse(dir.to_json)
       parsed.as_a.size.should eq(1)
-      parsed[0]["address"].as_s.should eq("a")
+      parsed[0]["address"].as_s.should eq("a:agent")
       parsed[0]["kind"].as_s.should eq("agent")
       parsed[0]["tags"].as_a.map(&.as_s).should eq(["tag1"])
     end
@@ -213,11 +213,11 @@ describe Arcana::Directory do
         kind: Arcana::Directory::Kind::Service,
       ))
 
-      # Save a file with a conflicting address
+      # Save a file with a conflicting address (same kind → same qualified name)
       dir2 = Arcana::Directory.new
       dir2.register(Arcana::Directory::Listing.new(
         address: "builtin", name: "Persisted", description: "should be skipped",
-        kind: Arcana::Directory::Kind::Agent,
+        kind: Arcana::Directory::Kind::Service,
       ))
       dir2.register(Arcana::Directory::Listing.new(
         address: "external", name: "External", description: "should load",

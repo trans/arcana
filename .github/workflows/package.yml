@@ -1,0 +1,95 @@
+name: Package
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  arch:
+    name: Arch Linux (PKGBUILD)
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Crystal and runtime libs
+        run: |
+          pacman -Syu --noconfirm crystal shards
+          pacman -S --noconfirm openssl pcre2 gc gcc-libs zlib make gcc
+
+      - name: Build
+        run: |
+          shards install --production
+          crystal build --release --no-debug bin/arcana.cr -o bin/arcana
+          crystal build --release --no-debug bin/arcana-mcp.cr -o bin/arcana-mcp
+
+      - name: Stage package tree
+        run: |
+          mkdir -p dist
+          install -Dm755 bin/arcana     dist/usr/bin/arcana
+          install -Dm755 bin/arcana-mcp dist/usr/bin/arcana-mcp
+          install -Dm755 bin/arcana-init dist/usr/bin/arcana-init
+          install -Dm644 pkg/debian/arcana.service \
+            dist/usr/lib/systemd/system/arcana.service
+          install -Dm640 pkg/debian/arcana.env dist/etc/arcana/arcana.env
+          install -Dm644 LICENSE dist/usr/share/licenses/arcana/LICENSE
+          printf 'u arcana - "Arcana agent bus service" /nonexistent /usr/sbin/nologin\n' \
+            | install -Dm644 /dev/stdin dist/usr/lib/sysusers.d/arcana.conf
+          printf 'd /var/lib/arcana 0750 arcana arcana -\n' \
+            | install -Dm644 /dev/stdin dist/usr/lib/tmpfiles.d/arcana.conf
+          cd dist && tar czf ../arcana-${GITHUB_REF_NAME:-dev}-x86_64-arch.tar.gz *
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arcana-arch
+          path: arcana-*-arch.tar.gz
+
+  deb:
+    name: Debian Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Crystal and build deps
+        run: |
+          curl -fsSL https://crystal-lang.org/install.sh | sudo bash
+          sudo apt-get install -y crystal build-essential \
+            libssl-dev libpcre2-dev libgc-dev zlib1g-dev \
+            dpkg-dev debhelper
+
+      - name: Prepare debian packaging
+        run: ln -s pkg/debian debian
+
+      - name: Build package
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: Collect deb
+        run: |
+          mkdir -p dist
+          cp ../arcana_*.deb dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arcana-deb
+          path: dist/*.deb
+
+  release-assets:
+    name: Upload release assets
+    if: github.event_name == 'release'
+    needs: [arch, deb]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            arcana-arch/*
+            arcana-deb/*

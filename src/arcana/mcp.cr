@@ -148,7 +148,7 @@ module Arcana
       },
     ]
 
-    def initialize(@base_url : String = "http://127.0.0.1:4000")
+    def initialize(@base_url : String = "http://127.0.0.1:19118")
     end
 
     # Run the MCP stdio loop. Blocks.

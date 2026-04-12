@@ -1,0 +1,29 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # Create system user with no home directory — state lives
+        # in /var/lib/arcana and config in /etc/arcana.
+        if ! getent passwd arcana >/dev/null; then
+            adduser --system --group --no-create-home \
+                    --home /var/lib/arcana --shell /usr/sbin/nologin \
+                    --gecos "Arcana agent bus service" arcana
+        fi
+
+        # State directory for snapshot persistence.
+        mkdir -p /var/lib/arcana
+        chown -R arcana:arcana /var/lib/arcana
+        chmod 750 /var/lib/arcana
+
+        # Secure the env file (contains API keys).
+        if [ -f /etc/arcana/arcana.env ]; then
+            chown root:arcana /etc/arcana/arcana.env
+            chmod 640 /etc/arcana/arcana.env
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

@@ -444,7 +444,7 @@ Strategies: `OneForOne` (restart failed actor) or `OneForAll` (restart all on fa
 WebSocket + REST gateway that bridges remote agents to the local bus:
 
 ```crystal
-server = Arcana::Server.new(bus, dir, host: "127.0.0.1", port: 4000,
+server = Arcana::Server.new(bus, dir, host: "127.0.0.1", port: 19118,
   state_file: "~/.arcana/directory.json")
 server.start  # blocking
 ```
@@ -476,7 +476,7 @@ Connects Claude Code (or any MCP client) to the Arcana bus via stdio:
     "arcana": {
       "type": "stdio",
       "command": "/path/to/arcana-mcp",
-      "env": { "ARCANA_URL": "http://127.0.0.1:4000" }
+      "env": { "ARCANA_URL": "http://127.0.0.1:19118" }
     }
   }
 }
@@ -500,7 +500,7 @@ Connects Claude Code (or any MCP client) to the Arcana bus via stdio:
 
 ```
 just build    # compile server + MCP bridge
-just serve    # start the server (port 4000)
+just serve    # start the server (port 19118)
 just test     # run specs
 just docs     # generate API docs
 ```
@@ -515,7 +515,7 @@ bin/arcana serve --fresh
 
 **Server:**
 - `ARCANA_HOST` — server host (default: `127.0.0.1`)
-- `ARCANA_PORT` — server port (default: `4000`)
+- `ARCANA_PORT` — server port (default: `19118`)
 - `ARCANA_STATE_DIR` — state directory (default: `~/.arcana`)
 
 **Provider services** (registered when key is present):

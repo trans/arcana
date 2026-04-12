@@ -1,0 +1,15 @@
+Source: arcana
+Section: net
+Priority: optional
+Maintainer: trans <transfire@gmail.com>
+Build-Depends: debhelper-compat (= 13), crystal, git, build-essential, libssl-dev, libpcre2-dev, libgc-dev, zlib1g-dev
+Standards-Version: 4.6.0
+Homepage: https://github.com/trans/arcana
+
+Package: arcana
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, libssl3, libpcre2-8-0, libgc1, zlib1g, adduser
+Description: Agent communication bus and AI provider library
+ Arcana is a Crystal library and server providing a mailbox-based agent
+ communication bus and provider-agnostic interfaces for chat, image, TTS,
+ and embedding services. Includes an MCP bridge for Claude Code integration.

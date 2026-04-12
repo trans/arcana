@@ -3,9 +3,9 @@ require "json"
 module Arcana
   # Registry of agent and service capabilities.
   #
-  # Each address on the Bus can register a Listing that describes
-  # what it does, whether it's an LLM-backed agent or a simple
-  # service, and optionally what input schema it expects.
+  # Addresses are qualified by kind: "name:agent" or "name:service".
+  # Registration always produces a qualified address. Lookups accept
+  # either qualified or bare names — bare names resolve if unambiguous.
   class Directory
     enum Kind
       Agent
@@ -49,36 +49,113 @@ module Arcana
     @busy = {} of String => Bool
     @mutex = Mutex.new
 
-    # Register a listing. Overwrites any existing listing at the same address.
-    def register(listing : Listing)
-      @mutex.synchronize { @listings[listing.address] = listing }
+    # Build a qualified address from a bare name and kind.
+    def self.qualify(name : String, kind : Kind) : String
+      bare = bare_name(name)
+      "#{bare}:#{kind.to_s.downcase}"
     end
 
-    # Remove a listing by address.
-    def unregister(address : String)
+    # Extract the bare name from an address (qualified or not).
+    def self.bare_name(address : String) : String
+      if address.ends_with?(":agent") || address.ends_with?(":service")
+        address.rpartition(':').first
+      else
+        address
+      end
+    end
+
+    # Check if an address is already qualified.
+    def self.qualified?(address : String) : Bool
+      address.ends_with?(":agent") || address.ends_with?(":service")
+    end
+
+    # Register a listing. The address is auto-qualified by kind.
+    # Raises if the qualified address is already taken.
+    def register(listing : Listing)
+      qualified = Directory.qualify(listing.address, listing.kind)
       @mutex.synchronize do
-        @listings.delete(address)
-        @busy.delete(address)
+        if @listings.has_key?(qualified)
+          raise Error.new("Address already registered: #{qualified}")
+        end
+        entry = Listing.new(
+          address: qualified,
+          name: listing.name,
+          description: listing.description,
+          kind: listing.kind,
+          schema: listing.schema,
+          guide: listing.guide,
+          tags: listing.tags,
+        )
+        @listings[qualified] = entry
+      end
+    end
+
+    # Remove a listing by address (qualified or bare).
+    # Idempotent — does nothing if the address isn't registered.
+    # Raises only if a bare name is ambiguous.
+    def unregister(address : String)
+      resolved = resolve?(address)
+      return unless resolved
+      @mutex.synchronize do
+        @listings.delete(resolved)
+        @busy.delete(resolved)
       end
     end
 
     # Mark an address as busy or idle.
-    # Raises if the address has no directory listing.
     def set_busy(address : String, busy : Bool = true)
+      resolved = resolve(address)
       @mutex.synchronize do
-        raise "no directory listing for '#{address}'" unless @listings.has_key?(address)
-        @busy[address] = busy
+        raise "no directory listing for '#{resolved}'" unless @listings.has_key?(resolved)
+        @busy[resolved] = busy
       end
     end
 
     # Check if an address is currently busy.
     def busy?(address : String) : Bool
-      @mutex.synchronize { @busy[address]? || false }
+      resolved = resolve?(address) || address
+      @mutex.synchronize { @busy[resolved]? || false }
     end
 
-    # Look up a listing by address.
+    # Look up a listing by address (qualified or bare).
+    # Bare names are resolved; returns nil if not found, raises if ambiguous.
     def lookup(address : String) : Listing?
-      @mutex.synchronize { @listings[address]? }
+      resolved = resolve?(address)
+      return nil unless resolved
+      @mutex.synchronize { @listings[resolved]? }
+    end
+
+    # Resolve a bare or qualified address to its qualified form.
+    # Returns nil if not found. Raises if bare name is ambiguous.
+    def resolve?(address : String) : String?
+      @mutex.synchronize do
+        # Try exact match first (already qualified, or legacy)
+        return address if @listings.has_key?(address)
+
+        # If already qualified, not found
+        return nil if Directory.qualified?(address)
+
+        # Bare name — look for matches
+        agent_key = "#{address}:agent"
+        service_key = "#{address}:service"
+        has_agent = @listings.has_key?(agent_key)
+        has_service = @listings.has_key?(service_key)
+
+        if has_agent && has_service
+          raise Error.new("Ambiguous address '#{address}' — use '#{agent_key}' or '#{service_key}'")
+        elsif has_agent
+          agent_key
+        elsif has_service
+          service_key
+        else
+          nil
+        end
+      end
+    end
+
+    # Resolve a bare or qualified address. Raises if not found or ambiguous.
+    def resolve(address : String) : String
+      resolve?(address) || raise Error.new("Address not found: #{address}")
     end
 
     # List all registered listings.
@@ -159,12 +236,13 @@ module Arcana
       count = 0
       @mutex.synchronize do
         parsed.as_a.each do |entry|
-          address = entry["address"].as_s
-          next if @listings.has_key?(address)
+          raw_address = entry["address"].as_s
           kind = entry["kind"]?.try(&.as_s?) == "service" ? Kind::Service : Kind::Agent
-          @listings[address] = Listing.new(
-            address: address,
-            name: entry["name"]?.try(&.as_s?) || address,
+          qualified = Directory.qualify(raw_address, kind)
+          next if @listings.has_key?(qualified)
+          @listings[qualified] = Listing.new(
+            address: qualified,
+            name: entry["name"]?.try(&.as_s?) || Directory.bare_name(raw_address),
             description: entry["description"]?.try(&.as_s?) || "",
             kind: kind,
             schema: entry["schema"]?,

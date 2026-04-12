@@ -1,0 +1,39 @@
+[Unit]
+Description=Arcana agent communication bus
+Documentation=https://github.com/trans/arcana
+After=network.target
+Wants=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=arcana
+Group=arcana
+WorkingDirectory=/var/lib/arcana
+ExecStart=/usr/bin/arcana
+EnvironmentFile=-/etc/arcana/arcana.env
+Environment=ARCANA_STATE_DIR=/var/lib/arcana
+UMask=007
+Restart=on-failure
+RestartSec=5
+
+# Graceful shutdown triggers the snapshot save handler in bin/arcana.cr.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/arcana
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

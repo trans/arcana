@@ -1,0 +1,59 @@
+# Maintainer: trans <transfire@gmail.com>
+pkgname=arcana
+pkgver=0.12.0
+pkgrel=1
+pkgdesc="Agent communication bus and AI provider library"
+arch=('x86_64')
+url="https://github.com/trans/arcana"
+license=('MIT')
+depends=(
+  'openssl'
+  'pcre2'
+  'gc'          # boehm-gc
+  'gcc-libs'    # libstdc++
+  'zlib'
+)
+makedepends=(
+  'crystal'
+  'shards'
+)
+backup=('etc/arcana/arcana.env')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "${pkgname}-${pkgver}"
+  shards install --production
+  crystal build --release --no-debug bin/arcana.cr -o bin/arcana
+  crystal build --release --no-debug bin/arcana-mcp.cr -o bin/arcana-mcp
+}
+
+package() {
+  cd "${pkgname}-${pkgver}"
+
+  # Binaries
+  install -Dm755 bin/arcana     "${pkgdir}/usr/bin/arcana"
+  install -Dm755 bin/arcana-mcp "${pkgdir}/usr/bin/arcana-mcp"
+
+  # Helper scripts (bash)
+  install -Dm755 bin/arcana-init "${pkgdir}/usr/bin/arcana-init"
+
+  # Systemd unit
+  install -Dm644 pkg/debian/arcana.service \
+    "${pkgdir}/usr/lib/systemd/system/arcana.service"
+
+  # Default environment file
+  install -Dm640 pkg/debian/arcana.env \
+    "${pkgdir}/etc/arcana/arcana.env"
+
+  # sysusers + tmpfiles for arcana user and state dir
+  install -Dm644 /dev/stdin "${pkgdir}/usr/lib/sysusers.d/arcana.conf" <<'EOF'
+u arcana - "Arcana agent bus service" /var/lib/arcana /usr/sbin/nologin
+EOF
+  install -Dm644 /dev/stdin "${pkgdir}/usr/lib/tmpfiles.d/arcana.conf" <<'EOF'
+d /var/lib/arcana 0750 arcana arcana -
+EOF
+
+  # License
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

@@ -14,6 +14,7 @@ module Arcana
     @@chat = {} of String => Proc(Config, Chat::Provider)
     @@image = {} of String => Proc(Config, Image::Provider)
     @@tts = {} of String => Proc(Config, TTS::Provider)
+    @@sfx = {} of String => Proc(Config, SFX::Provider)
     @@embed = {} of String => Proc(Config, Embed::Provider)
 
     # -- Registration --
@@ -28,6 +29,10 @@ module Arcana
 
     def self.register_tts(name : String, &block : Config -> TTS::Provider)
       @@tts[name] = block
+    end
+
+    def self.register_sfx(name : String, &block : Config -> SFX::Provider)
+      @@sfx[name] = block
     end
 
     def self.register_embed(name : String, &block : Config -> Embed::Provider)
@@ -51,6 +56,11 @@ module Arcana
       factory.call(config)
     end
 
+    def self.create_sfx(name : String, config : Config = Config.new) : SFX::Provider
+      factory = @@sfx[name]? || raise ConfigError.new("Unknown SFX provider: #{name}")
+      factory.call(config)
+    end
+
     def self.create_embed(name : String, config : Config = Config.new) : Embed::Provider
       factory = @@embed[name]? || raise ConfigError.new("Unknown embed provider: #{name}")
       factory.call(config)
@@ -68,6 +78,10 @@ module Arcana
 
     def self.tts_providers : Array(String)
       @@tts.keys.sort
+    end
+
+    def self.sfx_providers : Array(String)
+      @@sfx.keys.sort
     end
 
     def self.embed_providers : Array(String)
@@ -181,4 +195,18 @@ Arcana::Registry.register_embed("voyage") do |config|
     model: Arcana::Registry.str(config, "model", "voyage-3"),
     endpoint: Arcana::Registry.str(config, "endpoint", Arcana::Embed::Voyage::ENDPOINT),
   ).as(Arcana::Embed::Provider)
+end
+
+Arcana::Registry.register_tts("elevenlabs") do |config|
+  Arcana::TTS::ElevenLabs.new(
+    api_key: Arcana::Registry.str(config, "api_key"),
+    model: Arcana::Registry.str(config, "model", Arcana::TTS::ElevenLabs::DEFAULT_MODEL),
+    voice_id: Arcana::Registry.str(config, "voice_id", Arcana::TTS::ElevenLabs::DEFAULT_VOICE),
+  ).as(Arcana::TTS::Provider)
+end
+
+Arcana::Registry.register_sfx("elevenlabs") do |config|
+  Arcana::SFX::ElevenLabs.new(
+    api_key: Arcana::Registry.str(config, "api_key"),
+  ).as(Arcana::SFX::Provider)
 end
