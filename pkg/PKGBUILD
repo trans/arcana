@@ -1,6 +1,6 @@
 # Maintainer: trans <transfire@gmail.com>
 pkgname=arcana
-pkgver=0.12.1
+pkgver=0.12.2
 pkgrel=1
 pkgdesc="Agent communication bus and AI provider library"
 arch=('x86_64')
@@ -17,7 +17,8 @@ makedepends=(
   'crystal'
   'shards'
 )
-backup=('etc/arcana/arcana.env')
+backup=('etc/arcana/arcana.env' 'etc/arcana/secrets.env')
+install=arcana.install
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
 sha256sums=('SKIP')
 
@@ -46,7 +47,11 @@ package() {
   install -Dm640 pkg/debian/arcana.env \
     "${pkgdir}/etc/arcana/arcana.env"
 
-  # Secrets example (documentation only — not installed to /etc)
+  # Secrets file (empty template — user fills in API keys)
+  install -Dm640 pkg/debian/secrets.env.example \
+    "${pkgdir}/etc/arcana/secrets.env"
+
+  # Also keep a copy in docs as reference
   install -Dm644 pkg/debian/secrets.env.example \
     "${pkgdir}/usr/share/doc/arcana/secrets.env.example"
 

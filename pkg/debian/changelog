@@ -1,3 +1,11 @@
+arcana (0.12.2-1) unstable; urgency=medium
+
+  * Install secrets.env directly to /etc/arcana/ (no manual copy needed)
+  * Add .install script with post-install/upgrade hints
+  * Add secrets.env to backup array for pacman upgrade preservation
+
+ -- trans <transfire@gmail.com>  Mon, 14 Apr 2026 00:00:00 +0000
+
 arcana (0.12.1-1) unstable; urgency=medium
 
   * Split secrets.env from arcana.env (Shape B config pattern)

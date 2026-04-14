@@ -1,0 +1,20 @@
+post_install() {
+  # Ensure secrets file is readable by the arcana service
+  chown root:arcana /etc/arcana/secrets.env 2>/dev/null
+  chmod 640 /etc/arcana/secrets.env 2>/dev/null
+
+  echo ""
+  echo "==> To configure API keys:  sudoedit /etc/arcana/secrets.env"
+  echo "==> To start the service:   sudo systemctl enable --now arcana"
+  echo ""
+}
+
+post_upgrade() {
+  chown root:arcana /etc/arcana/secrets.env 2>/dev/null
+  chmod 640 /etc/arcana/secrets.env 2>/dev/null
+
+  echo ""
+  echo "==> Check for new keys:     diff /etc/arcana/secrets.env /usr/share/doc/arcana/secrets.env.example"
+  echo "==> Restart if needed:      sudo systemctl restart arcana"
+  echo ""
+}

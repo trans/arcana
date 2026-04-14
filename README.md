@@ -519,10 +519,14 @@ bin/arcana serve --fresh
 - `ARCANA_STATE_DIR` — state directory (default: `~/.arcana`)
 
 **Provider services** (registered when key is present):
-- `OPENAI_API_KEY` — enables chat:openai, embed:openai, tts:openai
+- `OPENAI_API_KEY` — enables chat:openai, embed:openai, tts:openai, image:openai
 - `ANTHROPIC_API_KEY` — enables chat:anthropic
 - `GOOGLE_API_KEY` — enables chat:gemini
+- `XAI_API_KEY` — enables chat:grok
+- `DEEPSEEK_API_KEY` — enables chat:deepseek
 - `RUNWARE_API_KEY` — enables image:runware
+- `VOYAGE_API_KEY` — enables embed:voyage
+- `ELEVENLABS_API_KEY` — enables tts:elevenlabs, sfx:elevenlabs
 
 ## License
 
