@@ -20,7 +20,20 @@ module Arcana
           j.field "saved_at", Time.utc.to_rfc3339
           j.field "listings" do
             j.array do
-              directory.list.each { |l| l.to_json(j) }
+              directory.list.each do |l|
+                j.object do
+                  j.field "address", l.address
+                  j.field "name", l.name
+                  j.field "description", l.description
+                  j.field "kind", l.kind.to_s.downcase
+                  j.field "schema", l.schema if l.schema
+                  j.field "guide", l.guide if l.guide
+                  j.field "tags", l.tags unless l.tags.empty?
+                  if seen = directory.last_seen(l.address)
+                    j.field "last_seen", seen.to_rfc3339
+                  end
+                end
+              end
             end
           end
           j.field "mailboxes" do
@@ -32,6 +45,7 @@ module Arcana
                 next if snap[:messages].empty? && snap[:frozen].empty?
                 j.object do
                   j.field "address", addr
+                  j.field "last_activity", mb.last_activity.to_rfc3339
                   j.field "messages" do
                     j.array do
                       snap[:messages].each { |env| env.to_json(j) }
@@ -80,6 +94,13 @@ module Arcana
       restore_mailboxes(bus, parsed["mailboxes"]?)
       restore_tokens(server, parsed["tokens"]?)
 
+      # Ensure every restored listing has a mailbox. The snapshot omits
+      # empty mailboxes to save space, but the bus needs one to exist for
+      # send() to queue messages for offline agents.
+      directory.list.each do |listing|
+        bus.mailbox(listing.address) unless bus.has_mailbox?(listing.address)
+      end
+
       true
     end
 
@@ -97,7 +118,13 @@ module Arcana
           guide: entry["guide"]?.try(&.as_s?),
           tags: entry["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
         )
-        directory.register(listing) unless directory.lookup(address)
+        unless directory.lookup(address)
+          directory.register(listing)
+          if last_seen_raw = entry["last_seen"]?.try(&.as_s?)
+            ts = (Time.parse_rfc3339(last_seen_raw) rescue nil)
+            directory.set_last_seen(Directory.qualify(Directory.bare_name(address), kind), ts) if ts
+          end
+        end
       end
     end
 
@@ -123,6 +150,10 @@ module Arcana
         end
 
         mb.load_snapshot(messages, frozen, frozen_by)
+        if la_raw = entry["last_activity"]?.try(&.as_s?)
+          ts = (Time.parse_rfc3339(la_raw) rescue nil)
+          mb.last_activity = ts if ts
+        end
       end
     end
 

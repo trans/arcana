@@ -47,6 +47,7 @@ module Arcana
 
     @listings = {} of String => Listing
     @busy = {} of String => Bool
+    @last_seen = {} of String => Time
     @mutex = Mutex.new
 
     # Build a qualified address from a bare name and kind.
@@ -87,7 +88,49 @@ module Arcana
           tags: listing.tags,
         )
         @listings[qualified] = entry
+        @last_seen[qualified] = Time.utc
       end
+    end
+
+    # Refresh the last-seen timestamp for an address. No-op if unregistered.
+    def touch(address : String)
+      resolved = resolve?(address)
+      return unless resolved
+      @mutex.synchronize { @last_seen[resolved] = Time.utc }
+    end
+
+    # Get the last-seen timestamp for an address.
+    def last_seen(address : String) : Time?
+      resolved = resolve?(address) || address
+      @mutex.synchronize { @last_seen[resolved]? }
+    end
+
+    # Set the last-seen timestamp directly (used by snapshot restore).
+    def set_last_seen(address : String, time : Time)
+      @mutex.synchronize { @last_seen[address] = time }
+    end
+
+    # Remove agent listings older than `ttl`. Services are never pruned
+    # (they get re-registered from code on each startup anyway).
+    # Returns the list of pruned addresses.
+    def prune_stale_agents(ttl : Time::Span) : Array(String)
+      cutoff = Time.utc - ttl
+      pruned = [] of String
+      @mutex.synchronize do
+        @listings.each do |addr, listing|
+          next unless listing.kind.agent?
+          ts = @last_seen[addr]? || Time.utc
+          if ts < cutoff
+            pruned << addr
+          end
+        end
+        pruned.each do |addr|
+          @listings.delete(addr)
+          @busy.delete(addr)
+          @last_seen.delete(addr)
+        end
+      end
+      pruned
     end
 
     # Remove a listing by address (qualified or bare).
@@ -99,6 +142,7 @@ module Arcana
       @mutex.synchronize do
         @listings.delete(resolved)
         @busy.delete(resolved)
+        @last_seen.delete(resolved)
       end
     end
 

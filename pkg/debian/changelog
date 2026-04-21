@@ -1,3 +1,16 @@
+arcana (0.12.3-1) unstable; urgency=medium
+
+  * Add TTL-based pruning for stale agent listings and mailboxes
+    (ARCANA_AGENT_TTL, ARCANA_MAILBOX_TTL, ARCANA_PRUNE_INTERVAL)
+  * Services are never pruned (re-registered from code on startup)
+  * Fix: messages to registered-but-offline agents no longer silently
+    dropped after a snapshot restart (empty mailboxes are re-created
+    for every restored listing)
+  * /deliver now returns 404 for truly-unknown addresses instead of
+    silently accepting the message
+
+ -- trans <transfire@gmail.com>  Tue, 21 Apr 2026 00:00:00 +0000
+
 arcana (0.12.2-1) unstable; urgency=medium
 
   * Install secrets.env directly to /etc/arcana/ (no manual copy needed)

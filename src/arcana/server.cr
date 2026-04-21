@@ -316,12 +316,17 @@ module Arcana
       timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
       timeout = timeout_ms.milliseconds
 
-      reply, resolved = @bus.deliver?(envelope, timeout: timeout)
+      # Use strict deliver (raises if no mailbox). Silent drops are worse
+      # than an error — callers need to know when a message didn't land.
+      reply, resolved = @bus.deliver(envelope, timeout: timeout)
       if reply
         ctx.response.print reply.to_json
       else
         ctx.response.print %({"ok":true,"ordering":"#{resolved.to_s.downcase}","correlation_id":"#{envelope.correlation_id}"})
       end
+    rescue ex : Arcana::Error
+      ctx.response.status = HTTP::Status::NOT_FOUND
+      ctx.response.print %({"error":"#{ex.message}"})
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})

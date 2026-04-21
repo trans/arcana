@@ -163,4 +163,43 @@ describe Arcana::Snapshot do
       File.delete(path) if File.exists?(path)
     end
   end
+
+  it "restores a mailbox for every listing even if it was empty at save time" do
+    # Regression: offline-agent messages were silently dropped because their
+    # (empty) mailboxes weren't persisted and weren't re-created on restore.
+    bus1 = Arcana::Bus.new
+    dir1 = Arcana::Directory.new
+    bus1.directory = dir1
+    server1 = Arcana::Server.new(bus1, dir1, port: 14110)
+
+    dir1.register(Arcana::Directory::Listing.new(
+      address: "offline", name: "Offline", description: "agent that's gone home",
+      kind: Arcana::Directory::Kind::Agent,
+    ))
+    bus1.mailbox("offline:agent") # exists but empty
+
+    path = File.tempname("arcana-snap", ".json")
+    begin
+      Arcana::Snapshot.save(bus1, dir1, server1, path)
+
+      # Fresh world — simulate restart
+      bus2 = Arcana::Bus.new
+      dir2 = Arcana::Directory.new
+      bus2.directory = dir2
+      server2 = Arcana::Server.new(bus2, dir2, port: 14111)
+
+      Arcana::Snapshot.load(bus2, dir2, server2, path)
+
+      # The listing is back
+      dir2.lookup("offline:agent").should_not be_nil
+      # And the mailbox is back too, so sends to the offline agent queue
+      bus2.has_mailbox?("offline:agent").should be_true
+
+      bus2.mailbox("sender:agent") # need a sender mailbox for the envelope
+      bus2.send(Arcana::Envelope.new(from: "sender:agent", to: "offline:agent", subject: "ping"))
+      bus2.pending("offline:agent").should eq(1)
+    ensure
+      File.delete(path) if File.exists?(path)
+    end
+  end
 end

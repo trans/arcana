@@ -58,7 +58,14 @@ module Arcana
     # Get or create a mailbox for an address.
     def mailbox(address : String) : Mailbox
       @mutex.synchronize do
-        @mailboxes[address] ||= @mailbox_factory.call(address)
+        mb = @mailboxes[address] ||= @mailbox_factory.call(address)
+        if mb.on_activity.nil?
+          mb.on_activity = ->(addr : String) {
+            @directory.try(&.touch(addr))
+            nil
+          }
+        end
+        mb
       end
     end
 
@@ -71,6 +78,34 @@ module Arcana
     # Remove a mailbox. Messages in flight are lost.
     def remove_mailbox(address : String)
       @mutex.synchronize { @mailboxes.delete(address) }
+    end
+
+    # Prune stale agent listings and inactive mailboxes.
+    # - Agent listings with last_seen older than `listing_ttl` are removed.
+    # - Mailboxes with last_activity older than `mailbox_ttl` are removed.
+    # Services are never pruned (they are re-registered from code at startup).
+    # Returns {pruned_listings, pruned_mailboxes}.
+    def prune_stale(listing_ttl : Time::Span, mailbox_ttl : Time::Span) : {Array(String), Array(String)}
+      pruned_listings = [] of String
+      if dir = @directory
+        pruned_listings = dir.prune_stale_agents(listing_ttl)
+      end
+
+      mailbox_cutoff = Time.utc - mailbox_ttl
+      stale_mailboxes = [] of String
+      @mutex.synchronize do
+        @mailboxes.each do |addr, mb|
+          next if addr.starts_with?("_reply:")
+          # Skip mailboxes whose address still has an active listing
+          if dir = @directory
+            next if dir.lookup(addr)
+          end
+          stale_mailboxes << addr if mb.last_activity < mailbox_cutoff
+        end
+        stale_mailboxes.each { |addr| @mailboxes.delete(addr) }
+      end
+
+      {pruned_listings, stale_mailboxes}
     end
 
     # List all registered addresses.
@@ -92,6 +127,7 @@ module Arcana
       resolved = resolve_address(envelope.to)
       mb = @mutex.synchronize { @mailboxes[resolved]? }
       raise Error.new("No mailbox for address: #{envelope.to}") unless mb
+      @directory.try(&.touch(envelope.from)) unless envelope.from.empty?
       mb.deliver(envelope)
     end
 
@@ -100,6 +136,7 @@ module Arcana
       resolved = resolve_address(envelope.to)
       mb = @mutex.synchronize { @mailboxes[resolved]? }
       return false unless mb
+      @directory.try(&.touch(envelope.from)) unless envelope.from.empty?
       mb.deliver(envelope)
       true
     end
@@ -123,6 +160,7 @@ module Arcana
       @mutex.synchronize do
         (@subscriptions[topic] ||= Set(String).new) << address
       end
+      @directory.try(&.touch(address))
     end
 
     # Unsubscribe an address from a topic.
@@ -151,6 +189,7 @@ module Arcana
     # Publish an envelope to all subscribers of a topic.
     # The envelope's `to` is set to each subscriber's address on delivery.
     def publish(topic : String, envelope : Envelope)
+      @directory.try(&.touch(envelope.from)) unless envelope.from.empty?
       subs = @mutex.synchronize { @subscriptions[topic]?.try(&.dup) }
       return unless subs
 

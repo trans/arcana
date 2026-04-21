@@ -664,6 +664,37 @@ end
 Signal::INT.trap { shutdown.call(Signal::INT) }
 Signal::TERM.trap { shutdown.call(Signal::TERM) }
 
+# -- Periodic prune of stale agent listings and inactive mailboxes --
+
+listing_ttl = (ENV["ARCANA_AGENT_TTL"]? || "86400").to_i.seconds    # 24h default
+mailbox_ttl = (ENV["ARCANA_MAILBOX_TTL"]? || "259200").to_i.seconds # 72h default
+prune_interval = (ENV["ARCANA_PRUNE_INTERVAL"]? || "3600").to_i.seconds # hourly default
+
+prune_now = ->{
+  pruned_listings, pruned_mailboxes = bus.prune_stale(listing_ttl, mailbox_ttl)
+  unless pruned_listings.empty? && pruned_mailboxes.empty?
+    STDERR.puts "Pruned #{pruned_listings.size} stale listings, #{pruned_mailboxes.size} inactive mailboxes"
+    pruned_listings.each { |a| STDERR.puts "  listing:  #{a}" }
+    pruned_mailboxes.each { |a| STDERR.puts "  mailbox:  #{a}" }
+  end
+}
+
+# Run once at startup (after snapshot load) to clear out anything stale
+# left over from the previous session.
+prune_now.call
+
+# Spawn periodic prune fiber.
+spawn do
+  loop do
+    sleep prune_interval
+    begin
+      prune_now.call
+    rescue ex
+      STDERR.puts "Prune error: #{ex.message}"
+    end
+  end
+end
+
 STDERR.puts "Arcana v#{Arcana::VERSION} starting on #{host}:#{port}"
 STDERR.puts "  WebSocket: ws://#{host}:#{port}/bus"
 STDERR.puts "  REST:      http://#{host}:#{port}/directory"

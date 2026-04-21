@@ -248,4 +248,57 @@ describe Arcana::Directory do
       dir.load("/nonexistent/path.json").should eq(0)
     end
   end
+
+  describe "stale pruning" do
+    it "touches last_seen on registration" do
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "a", name: "A", description: "a",
+        kind: Arcana::Directory::Kind::Agent,
+      ))
+      dir.last_seen("a:agent").should_not be_nil
+    end
+
+    it "prunes agent listings older than TTL" do
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "old", name: "Old", description: "old agent",
+        kind: Arcana::Directory::Kind::Agent,
+      ))
+      dir.register(Arcana::Directory::Listing.new(
+        address: "new", name: "New", description: "fresh agent",
+        kind: Arcana::Directory::Kind::Agent,
+      ))
+      dir.set_last_seen("old:agent", Time.utc - 2.hours)
+
+      pruned = dir.prune_stale_agents(1.hour)
+      pruned.should contain("old:agent")
+      pruned.should_not contain("new:agent")
+      dir.lookup("old:agent").should be_nil
+      dir.lookup("new:agent").should_not be_nil
+    end
+
+    it "never prunes service listings" do
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "svc", name: "Svc", description: "a service",
+        kind: Arcana::Directory::Kind::Service,
+      ))
+      dir.set_last_seen("svc:service", Time.utc - 30.days)
+      pruned = dir.prune_stale_agents(1.hour)
+      pruned.should be_empty
+      dir.lookup("svc:service").should_not be_nil
+    end
+
+    it "refreshes last_seen via touch" do
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "a", name: "A", description: "a",
+        kind: Arcana::Directory::Kind::Agent,
+      ))
+      dir.set_last_seen("a:agent", Time.utc - 1.day)
+      dir.touch("a:agent")
+      (Time.utc - dir.last_seen("a:agent").not_nil!).should be < 1.second
+    end
+  end
 end

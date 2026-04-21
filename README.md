@@ -517,6 +517,9 @@ bin/arcana serve --fresh
 - `ARCANA_HOST` — server host (default: `127.0.0.1`)
 - `ARCANA_PORT` — server port (default: `19118`)
 - `ARCANA_STATE_DIR` — state directory (default: `~/.arcana`)
+- `ARCANA_AGENT_TTL` — seconds before a quiet agent listing is pruned (default: `86400` / 24h)
+- `ARCANA_MAILBOX_TTL` — seconds before an inactive mailbox is dropped (default: `259200` / 72h)
+- `ARCANA_PRUNE_INTERVAL` — seconds between stale-state prune cycles (default: `3600` / 1h)
 
 **Provider services** (registered when key is present):
 - `OPENAI_API_KEY` — enables chat:openai, embed:openai, tts:openai, image:openai

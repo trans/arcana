@@ -6,10 +6,15 @@ module Arcana
   class Mailbox
     getter address : String
 
+    # Optional callback invoked on any activity (deliver, receive).
+    # Used by Bus to refresh Directory last_seen.
+    property on_activity : Proc(String, Nil)? = nil
+
     def initialize(@address : String)
       @messages = Deque(Envelope).new
       @mutex = Mutex.new
       @signal = Channel(Nil).new(1) # buffered signal for wake-ups
+      @last_activity = Time.utc
 
       # Expected response tracking
       @expectations = Set(String).new
@@ -21,6 +26,16 @@ module Arcana
       @frozen_by = {} of String => String
     end
 
+    # Last time this mailbox had a deliver or receive operation.
+    def last_activity : Time
+      @mutex.synchronize { @last_activity }
+    end
+
+    # Set last activity timestamp directly (used by snapshot restore).
+    def last_activity=(time : Time)
+      @mutex.synchronize { @last_activity = time }
+    end
+
     # Number of messages waiting to be received.
     def pending : Int32
       @mutex.synchronize { @messages.size }
@@ -28,7 +43,10 @@ module Arcana
 
     # Deliver an envelope to this mailbox.
     def deliver(envelope : Envelope)
-      @mutex.synchronize { @messages.push(envelope) }
+      @mutex.synchronize do
+        @messages.push(envelope)
+        @last_activity = Time.utc
+      end
       on_deliver(envelope)
       # Auto-fulfill expectations
       fulfill(envelope.correlation_id)
@@ -41,11 +59,13 @@ module Arcana
 
     # Non-destructive listing of message metadata.
     def inbox : Array(NamedTuple(correlation_id: String, from: String, subject: String, timestamp: Time))
-      @mutex.synchronize do
+      result = @mutex.synchronize do
         @messages.map do |env|
           {correlation_id: env.correlation_id, from: env.from, subject: env.subject, timestamp: env.timestamp}
         end
       end
+      @on_activity.try(&.call(@address))
+      result
     end
 
     # Block until an envelope arrives.
@@ -79,8 +99,11 @@ module Arcana
     def receive(id : String) : Envelope?
       env = @mutex.synchronize do
         idx = @messages.index { |e| e.correlation_id == id }
-        @messages.delete_at(idx) if idx
+        e = @messages.delete_at(idx) if idx
+        @last_activity = Time.utc if e
+        e
       end
+      @on_activity.try(&.call(@address))
       on_consume(env) if env
       env
     end
@@ -105,7 +128,12 @@ module Arcana
 
     # Non-blocking receive. Returns nil if empty.
     def try_receive : Envelope?
-      env = @mutex.synchronize { @messages.shift? }
+      env = @mutex.synchronize do
+        e = @messages.shift?
+        @last_activity = Time.utc if e
+        e
+      end
+      @on_activity.try(&.call(@address))
       on_consume(env) if env
       env
     end
