@@ -1,5 +1,5 @@
 name: arcana
-version: 0.12.3
+version: 0.13.0
 
 authors:
   - Thomas Sawyer <transfire@gmail.com>
@@ -9,6 +9,8 @@ crystal: '>= 1.19.1'
 license: MIT
 
 dependencies:
+  arcana-core:
+    path: ../arcana-core
   markd:
     github: icyleaf/markd
   markterm:

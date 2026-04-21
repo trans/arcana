@@ -1,4 +1,5 @@
 require "json"
+require "arcana-core"
 
 require "./arcana/trace"
 require "./arcana/error"
@@ -37,7 +38,6 @@ require "./arcana/embed/result"
 require "./arcana/embed/provider"
 require "./arcana/embed/openai"
 require "./arcana/embed/voyage"
-require "./arcana/bus"
 require "./arcana/actor"
 require "./arcana/chat_agent"
 require "./arcana/supervisor"
@@ -48,5 +48,5 @@ require "./arcana/markdown"
 require "./arcana/registry"
 
 module Arcana
-  VERSION = "0.12.3"
+  VERSION = "0.13.0"
 end

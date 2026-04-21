@@ -1,5 +1,9 @@
 version: 2.0
 shards:
+  arcana-core:
+    path: ../arcana-core
+    version: 0.1.0
+
   baked_file_system:
     git: https://github.com/ralsina/baked_file_system.git
     version: 0.10.0+git.commit.beb373124c7a235cfb9cd94e36849d8168eaa04b

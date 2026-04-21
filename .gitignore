@@ -4,3 +4,9 @@
 /bin/arcana-mcp
 /.shards/
 *.dwarf
+.env
+.claude/
+/pkg/src/
+/pkg/pkg/
+/pkg/*.tar.gz
+/pkg/*.pkg.tar.zst

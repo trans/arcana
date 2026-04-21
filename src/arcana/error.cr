@@ -1,6 +1,4 @@
 module Arcana
-  class Error < Exception; end
-
   class ConfigError < Error; end
 
   class APIError < Error
