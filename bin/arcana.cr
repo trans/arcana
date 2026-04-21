@@ -244,8 +244,6 @@ markdown_svc.start
 
 # -- Provider-backed services (only registered when API keys are present) --
 
-services = ["echo", "registry", "markdown"]
-
 if openai_key = ENV["OPENAI_API_KEY"]?
   chat_openai = Arcana::Chat::OpenAI.new(api_key: openai_key)
   chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150)"}},"required":["messages"]}))
@@ -294,7 +292,6 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     })
   end
   chat_openai_svc.start
-  services << "chat:openai"
 
   # Embed service
   embed_openai = Arcana::Embed::OpenAI.new(api_key: openai_key)
@@ -329,7 +326,6 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     })
   end
   embed_svc.start
-  services << "embed:openai"
 
   # TTS service
   tts_openai = Arcana::TTS::OpenAI.new(api_key: openai_key)
@@ -373,7 +369,6 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     })
   end
   tts_svc.start
-  services << "tts:openai"
 end
 
 if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
@@ -426,7 +421,6 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
     })
   end
   chat_anthropic_svc.start
-  services << "chat:anthropic"
 end
 
 if google_key = ENV["GOOGLE_API_KEY"]?
@@ -479,7 +473,6 @@ if google_key = ENV["GOOGLE_API_KEY"]?
     })
   end
   chat_gemini_svc.start
-  services << "chat:gemini"
 end
 
 if runware_key = ENV["RUNWARE_API_KEY"]?
@@ -529,7 +522,6 @@ if runware_key = ENV["RUNWARE_API_KEY"]?
     JSON::Any.new(h)
   end
   image_svc.start
-  services << "image:runware"
 end
 
 # -- ChatAgents (autonomous LLM-backed agents) --
@@ -545,8 +537,6 @@ end
 #   ARCANA_AGENT_SYSTEM_PROMPT="You are helpful."
 #   ARCANA_AGENT_MAX_TOKENS=1024
 #   ARCANA_AGENT_TEMPERATURE=0.7
-
-agents = [] of String
 
 if agents_json = ENV["ARCANA_AGENTS"]?
   JSON.parse(agents_json).as_a.each do |agent_def|
@@ -587,7 +577,6 @@ if agents_json = ENV["ARCANA_AGENTS"]?
       tags: tags,
     )
     agent.start
-    agents << address
   end
 elsif agent_address = ENV["ARCANA_AGENT_ADDRESS"]?
   provider_name = ENV["ARCANA_AGENT_PROVIDER"]? || "openai"
@@ -621,7 +610,6 @@ elsif agent_address = ENV["ARCANA_AGENT_ADDRESS"]?
     temperature: (ENV["ARCANA_AGENT_TEMPERATURE"]? || "0.7").to_f,
   )
   agent.start
-  agents << agent_address
 end
 
 # -- Construct server (needed before snapshot load for token restoration) --
@@ -695,13 +683,16 @@ spawn do
   end
 end
 
+live_services = dir.list.select(&.kind.service?).map(&.address).sort
+live_agents = dir.list.select(&.kind.agent?).map(&.address).sort
+
 STDERR.puts "Arcana v#{Arcana::VERSION} starting on #{host}:#{port}"
 STDERR.puts "  WebSocket: ws://#{host}:#{port}/bus"
 STDERR.puts "  REST:      http://#{host}:#{port}/directory"
 STDERR.puts "  Health:    http://#{host}:#{port}/health"
-STDERR.puts "  Services:  #{services.join(", ")}"
-STDERR.puts "  Agents:    #{agents.empty? ? "(none)" : agents.join(", ")}"
 STDERR.puts "  Restored:  #{restored} listings, #{restored_messages} pending messages" if restored > 0
+STDERR.puts "  Services:  #{live_services.empty? ? "(none)" : live_services.join(", ")}"
+STDERR.puts "  Agents:    #{live_agents.empty? ? "(none)" : live_agents.join(", ")}"
 STDERR.puts "  Directory: #{dir.list.size} listings"
 STDERR.puts "  Snapshot:  #{snapshot_file}"
 
