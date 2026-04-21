@@ -10,7 +10,8 @@ license: MIT
 
 dependencies:
   arcana-core:
-    path: ../arcana-core
+    github: trans/arcana-core
+    version: ~> 0.1.0
   markd:
     github: icyleaf/markd
   markterm:

@@ -1,7 +1,7 @@
 version: 2.0
 shards:
   arcana-core:
-    path: ../arcana-core
+    git: https://github.com/trans/arcana-core.git
     version: 0.1.0
 
   baked_file_system:
