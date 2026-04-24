@@ -145,6 +145,19 @@ module Arcana
           properties: {} of String => String,
         },
       },
+      {
+        name:        "arcana_events",
+        description: "Query the Arcana audit event log. Returns an array of events matching the filters (type, subject, since, limit). Useful for debugging message flow, tracking auth failures, and auditing who registered when.",
+        inputSchema: {
+          type:       "object",
+          properties: {
+            type:    {type: "string", description: "Filter by event type (e.g. 'message.sent', 'listing.registered', 'auth.failed')"},
+            subject: {type: "string", description: "Filter by subject address (usually the primary actor of the event)"},
+            since:   {type: "string", description: "RFC3339 timestamp; only events at or after this time are returned"},
+            limit:   {type: "integer", description: "Max events to return (default 100, cap 1000)"},
+          },
+        },
+      },
     ]
 
     def initialize(@base_url : String = "http://127.0.0.1:19118")
@@ -250,6 +263,8 @@ module Arcana
         call_freeze(args)
       when "arcana_health"
         call_health
+      when "arcana_events"
+        call_events(args)
       else
         %({"error":"unknown tool: #{name}"})
       end
@@ -416,6 +431,24 @@ module Arcana
 
     private def call_health : String
       http_get("/health")
+    end
+
+    private def call_events(args : JSON::Any) : String
+      params = [] of String
+      if type = args["type"]?.try(&.as_s?)
+        params << "type=#{URI.encode_path_segment(type)}"
+      end
+      if subject = args["subject"]?.try(&.as_s?)
+        params << "subject=#{URI.encode_path_segment(subject)}"
+      end
+      if since = args["since"]?.try(&.as_s?)
+        params << "since=#{URI.encode_path_segment(since)}"
+      end
+      if limit = args["limit"]?.try(&.as_i?)
+        params << "limit=#{limit}"
+      end
+      qs = params.empty? ? "" : "?#{params.join('&')}"
+      http_get("/events#{qs}")
     end
 
     # --- Resource support ---

@@ -1,3 +1,20 @@
+arcana (0.15.0-1) unstable; urgency=medium
+
+  * Append-only event log: every material bus action (registrations,
+    sends, publishes, subscribe/unsubscribe, freezes, auth failures,
+    server lifecycle) is recorded as a metadata-only event.
+  * Default storage: $ARCANA_STATE_DIR/events/ (daily JSONL files,
+    gzipped after 2 days, purged after 90 days).
+  * New env knobs: ARCANA_EVENT_LOG_DIR, ARCANA_EVENT_COMPRESS_AGE_DAYS,
+    ARCANA_EVENT_RETAIN_DAYS, ARCANA_EVENT_ARCHIVE_DIR,
+    ARCANA_EVENT_MAX_SIZE_MB, ARCANA_EVENT_SWEEP_INTERVAL,
+    ARCANA_EVENT_LOG_DISABLE.
+  * REST: GET /events?type=...&subject=...&since=...&limit=...
+  * MCP: arcana_events tool.
+  * Depends on arcana-core ~> 0.3.0.
+
+ -- trans <transfire@gmail.com>  Fri, 24 Apr 2026 12:00:00 +0000
+
 arcana (0.14.0-1) unstable; urgency=medium
 
   * BREAKING: new address scheme. Agents are plain names ("alice").

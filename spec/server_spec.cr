@@ -1,5 +1,6 @@
 require "./spec_helper"
 require "http/client"
+require "file_utils"
 
 describe Arcana::Server do
   it "serves REST directory endpoints" do
@@ -186,6 +187,56 @@ describe Arcana::Server do
       resp.status_code.should eq(200)
     ensure
       server.stop
+    end
+  end
+
+  describe "GET /events" do
+    it "returns events when a backend is attached" do
+      dir_path = File.tempname("arcana-events-rest")
+      backend = Arcana::Events::FileBackend.new(log_dir: dir_path, retain_days: 7)
+      begin
+        bus = Arcana::Bus.new
+        dir = Arcana::Directory.new
+        bus.directory = dir
+        bus.events = backend
+        dir.events = backend
+
+        dir.register(Arcana::Directory::Listing.new(
+          address: "test-agent", name: "Test", description: "t",
+        ))
+        server = Arcana::Server.new(bus, dir, port: 14300)
+        server.events = backend
+        server.start_in_background
+        sleep 100.milliseconds
+
+        resp = HTTP::Client.get("http://127.0.0.1:14300/events?limit=50")
+        resp.status_code.should eq(200)
+        events = JSON.parse(resp.body).as_a
+        events.size.should be > 0
+        events.any? { |e| e["type"].as_s == "listing.registered" && e["subject"].as_s == "test-agent" }.should be_true
+
+        # Filter by type
+        resp = HTTP::Client.get("http://127.0.0.1:14300/events?type=listing.registered")
+        JSON.parse(resp.body).as_a.all? { |e| e["type"].as_s == "listing.registered" }.should be_true
+
+        server.stop
+      ensure
+        backend.close
+        FileUtils.rm_rf(dir_path)
+      end
+    end
+
+    it "404s when no backend is attached" do
+      bus = Arcana::Bus.new
+      dir = Arcana::Directory.new
+      server = Arcana::Server.new(bus, dir, port: 14301)
+      server.start_in_background
+      begin
+        resp = HTTP::Client.get("http://127.0.0.1:14301/events")
+        resp.status_code.should eq(404)
+      ensure
+        server.stop
+      end
     end
   end
 end

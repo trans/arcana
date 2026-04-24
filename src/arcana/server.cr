@@ -32,6 +32,9 @@ module Arcana
 
     property state_file : String?
 
+    # Optional event recorder for auth failures and server lifecycle.
+    property events : Events::Backend?
+
     def initialize(
       @bus : Bus,
       @directory : Directory,
@@ -82,7 +85,14 @@ module Arcana
       expected = @tokens[address]?
       return unless expected  # no token set = no auth required
       given = parsed["token"]?.try(&.as_s?) || ""
-      raise "unauthorized" unless given == expected
+      unless given == expected
+        @events.try &.record(Events::Event.new(
+          type: "auth.failed",
+          subject: address,
+          metadata: {"reason" => JSON::Any.new("token mismatch")} of String => JSON::Any,
+        ))
+        raise "unauthorized"
+      end
     end
 
     # Post-0.14: addresses are their own canonical form. This helper is a
@@ -110,6 +120,9 @@ module Arcana
         else
           ctx.response.print @directory.to_json
         end
+
+      when {"GET", "/events"}
+        handle_get_events(ctx)
 
       when {"GET", _}
         if path.starts_with?("/directory/")
@@ -475,6 +488,29 @@ module Arcana
       check_sender!(envelope.from)
       @bus.publish(topic, envelope)
       ctx.response.print %({"ok":true})
+    rescue ex
+      ctx.response.status = HTTP::Status::BAD_REQUEST
+      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    # GET /events?type=...&subject=...&since=<rfc3339>&limit=N
+    private def handle_get_events(ctx : HTTP::Server::Context)
+      backend = @events
+      unless backend
+        ctx.response.status = HTTP::Status::NOT_FOUND
+        ctx.response.print %({"error":"event log not enabled"})
+        return
+      end
+      type = ctx.request.query_params["type"]?
+      subject = ctx.request.query_params["subject"]?
+      since = ctx.request.query_params["since"]?.try do |s|
+        Time.parse_rfc3339(s) rescue raise "invalid 'since' timestamp — expected RFC3339"
+      end
+      limit = (ctx.request.query_params["limit"]? || "100").to_i
+      limit = 1000 if limit > 1000
+
+      events = backend.query(since: since, type: type, subject: subject, limit: limit)
+      ctx.response.print events.to_json
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})

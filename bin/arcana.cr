@@ -54,9 +54,29 @@ state_file = File.join(state_dir, "directory.json")
 
 Dir.mkdir_p(state_dir) unless Dir.exists?(state_dir)
 
+# -- Event log --
+# Audit log of material bus actions (registrations, sends, publishes,
+# freezes, auth failures, lifecycle). Opt-out by setting
+# ARCANA_EVENT_LOG_DISABLE=1. See Arcana::Events for the data model.
+events_backend =
+  if ENV["ARCANA_EVENT_LOG_DISABLE"]? == "1"
+    nil
+  else
+    event_log_dir = ENV["ARCANA_EVENT_LOG_DIR"]? || File.join(state_dir, "events")
+    Arcana::Events::FileBackend.new(
+      log_dir: event_log_dir,
+      compress_age_days: (ENV["ARCANA_EVENT_COMPRESS_AGE_DAYS"]? || "2").to_i,
+      retain_days: (ENV["ARCANA_EVENT_RETAIN_DAYS"]? || "90").to_i,
+      archive_dir: ENV["ARCANA_EVENT_ARCHIVE_DIR"]?,
+      max_size_mb: ENV["ARCANA_EVENT_MAX_SIZE_MB"]?.try(&.to_i),
+    )
+  end
+
 bus = Arcana::Bus.new
 dir = Arcana::Directory.new
 bus.directory = dir
+bus.events = events_backend
+dir.events = events_backend
 
 # -- Register Arcana itself --
 
@@ -615,6 +635,7 @@ end
 
 snapshot_file = File.join(state_dir, "state.json")
 server = Arcana::Server.new(bus, dir, host: host, port: port, state_file: state_file)
+server.events = events_backend
 
 # -- Restore persisted state --
 
@@ -637,14 +658,21 @@ end
 
 shutdown = ->(sig : Signal) do
   STDERR.puts "\nArcana shutting down — saving snapshot..."
+  events_backend.try &.record(Arcana::Events::Event.new(
+    type: "server.stopped",
+    subject: "#{host}:#{port}",
+    metadata: {"signal" => JSON::Any.new(sig.to_s)} of String => JSON::Any,
+  ))
   begin
     Arcana::Snapshot.save(bus, dir, server, snapshot_file)
     msg_count = 0
     bus.addresses.each { |a| msg_count += bus.pending(a) }
     STDERR.puts "  Saved #{dir.list.size} listings, #{msg_count} pending messages to #{snapshot_file}"
+    events_backend.try &.record(Arcana::Events::Event.new(type: "snapshot.saved", subject: snapshot_file))
   rescue ex
     STDERR.puts "  Snapshot save failed: #{ex.message}"
   end
+  events_backend.try &.close
   exit 0
 end
 
@@ -682,6 +710,29 @@ spawn do
   end
 end
 
+# -- Event log retention sweep --
+
+if events_backend
+  sweep_interval = (ENV["ARCANA_EVENT_SWEEP_INTERVAL"]? || "21600").to_i.seconds # 6h default
+  do_sweep = ->(b : Arcana::Events::FileBackend) {
+    r = b.sweep!
+    if r[:compressed] > 0 || r[:purged] > 0 || r[:archived] > 0
+      STDERR.puts "Event log sweep: compressed=#{r[:compressed]} purged=#{r[:purged]} archived=#{r[:archived]}"
+    end
+  }
+  do_sweep.call(events_backend.not_nil!)
+  spawn do
+    loop do
+      sleep sweep_interval
+      begin
+        do_sweep.call(events_backend.not_nil!)
+      rescue ex
+        STDERR.puts "Event sweep error: #{ex.message}"
+      end
+    end
+  end
+end
+
 live_services = dir.list.select(&.kind.service?).map(&.address).sort
 live_agents = dir.list.select(&.kind.agent?).map(&.address).sort
 
@@ -694,5 +745,14 @@ STDERR.puts "  Services:  #{live_services.empty? ? "(none)" : live_services.join
 STDERR.puts "  Agents:    #{live_agents.empty? ? "(none)" : live_agents.join(", ")}"
 STDERR.puts "  Directory: #{dir.list.size} listings"
 STDERR.puts "  Snapshot:  #{snapshot_file}"
+if backend = events_backend
+  STDERR.puts "  Events:    #{backend.log_dir}"
+end
+
+events_backend.try &.record(Arcana::Events::Event.new(
+  type: "server.started",
+  subject: "#{host}:#{port}",
+  metadata: {"version" => JSON::Any.new(Arcana::VERSION)} of String => JSON::Any,
+))
 
 server.start
