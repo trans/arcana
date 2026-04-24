@@ -713,7 +713,7 @@ end
 # -- Event log retention sweep --
 
 if events_backend
-  sweep_interval = (ENV["ARCANA_EVENT_SWEEP_INTERVAL"]? || "21600").to_i.seconds # 6h default
+  sweep_interval = (ENV["ARCANA_EVENT_SWEEP_INTERVAL"]? || "86400").to_i.seconds # 24h default
   do_sweep = ->(b : Arcana::Events::FileBackend) {
     r = b.sweep!
     if r[:compressed] > 0 || r[:purged] > 0 || r[:archived] > 0

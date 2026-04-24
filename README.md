@@ -527,7 +527,7 @@ bin/arcana serve --fresh
 - `ARCANA_EVENT_RETAIN_DAYS` — purge files older than this (default: `90`)
 - `ARCANA_EVENT_ARCHIVE_DIR` — if set, *move* old files here instead of deleting
 - `ARCANA_EVENT_MAX_SIZE_MB` — hard cap on log dir size; oldest evicted first
-- `ARCANA_EVENT_SWEEP_INTERVAL` — seconds between retention sweeps (default: `21600` / 6h)
+- `ARCANA_EVENT_SWEEP_INTERVAL` — seconds between retention sweeps (default: `86400` / 24h)
 - `ARCANA_EVENT_LOG_DISABLE` — set to `1` to turn the event log off
 
 **Provider services** (registered when key is present):
