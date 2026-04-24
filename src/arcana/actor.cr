@@ -26,15 +26,14 @@ module Arcana
     def initialize(
       @bus : Bus,
       @directory : Directory,
-      address : String,
+      @address : String,
       @name : String,
       @description : String,
-      @kind : Directory::Kind = Directory::Kind::Agent,
       @schema : JSON::Any? = nil,
       @guide : String? = nil,
       @tags : Array(String) = [] of String,
     )
-      @address = Directory.qualify(address, @kind)
+      Directory.validate_address(@address)
       @mailbox = nil
     end
 
@@ -67,7 +66,6 @@ module Arcana
         address: @address,
         name: @name,
         description: @description,
-        kind: @kind,
         schema: @schema,
         guide: @guide,
         tags: @tags,

@@ -71,12 +71,11 @@ module Arcana
         inputSchema: {
           type:       "object",
           properties: {
-            address:     {type: "string", description: "Your address on the bus"},
+            address:     {type: "string", description: "Your address on the bus. Agents are plain names (e.g. 'alice'); services are 'owner:capability' (e.g. 'arcana:echo')."},
             action:      {type: "string", enum: ["register", "unregister", "busy", "idle"], description: "Action to perform (default: register)"},
             token:       {type: "string", description: "Secret token to protect your mailbox (optional, you choose it)"},
             name:        {type: "string", description: "Display name for the directory"},
             description: {type: "string", description: "What you do (for the directory)"},
-            kind:        {type: "string", enum: ["agent", "service"], description: "Agent or service (default: agent)"},
             guide:       {type: "string", description: "How-to guide for interacting with you"},
             tags:        {type: "array", items: {type: "string"}, description: "Tags for discovery"},
           },
@@ -325,7 +324,6 @@ module Arcana
           token:       args["token"]?.try(&.as_s?),
           name:        args["name"]?.try(&.as_s?),
           description: args["description"]?.try(&.as_s?),
-          kind:        args["kind"]?.try(&.as_s?),
           guide:       args["guide"]?.try(&.as_s?),
           tags:        args["tags"]?,
         }.to_json

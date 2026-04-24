@@ -10,7 +10,6 @@ describe Arcana::Server do
       address: "test-agent",
       name: "Test Agent",
       description: "A test agent",
-      kind: Arcana::Directory::Kind::Agent,
       tags: ["test"],
     ))
 
@@ -29,7 +28,7 @@ describe Arcana::Server do
       resp.status_code.should eq(200)
       listings = JSON.parse(resp.body).as_a
       listings.size.should eq(1)
-      listings[0]["address"].as_s.should eq("test-agent:agent")
+      listings[0]["address"].as_s.should eq("test-agent")
 
       # GET /directory?tag=test
       resp = HTTP::Client.get("http://127.0.0.1:14000/directory?tag=test")
@@ -67,7 +66,7 @@ describe Arcana::Server do
     # Start an echo service
     svc = Arcana::Service.new(
       bus: bus, directory: dir,
-      address: "echo",
+      address: "arcana:echo",
       name: "Echo",
       description: "Echoes payload back",
     ) { |data| data }
@@ -84,7 +83,7 @@ describe Arcana::Server do
       headers = HTTP::Headers{"Content-Type" => "application/json"}
 
       # POST /send from unregistered sender — should be rejected
-      body = {from: "ghost", to: "echo", payload: "nope"}.to_json
+      body = {from: "ghost", to: "arcana:echo", payload: "nope"}.to_json
       resp = HTTP::Client.post("http://127.0.0.1:14001/send", headers: headers, body: body)
       resp.status_code.should eq(400)
       JSON.parse(resp.body)["error"].as_s.should contain("not registered")
@@ -92,7 +91,7 @@ describe Arcana::Server do
       # POST /request — should get echo reply
       body = {
         from:    "test-client",
-        to:      "echo",
+        to:      "arcana:echo",
         subject: "ping",
         payload: {message: "hello"},
       }.to_json
@@ -100,10 +99,10 @@ describe Arcana::Server do
       resp = HTTP::Client.post("http://127.0.0.1:14001/request", headers: headers, body: body)
       resp.status_code.should eq(200)
       result = JSON.parse(resp.body)
-      result["from"].as_s.should eq("echo:service")
+      result["from"].as_s.should eq("arcana:echo")
 
       # POST /send — fire and forget
-      body = {from: "test", to: "echo", payload: "fire"}.to_json
+      body = {from: "test", to: "arcana:echo", payload: "fire"}.to_json
       resp = HTTP::Client.post("http://127.0.0.1:14001/send", headers: headers, body: body)
       resp.status_code.should eq(200)
 
@@ -113,7 +112,7 @@ describe Arcana::Server do
       resp.status_code.should eq(404)
 
       # POST /request with timeout
-      body = {from: "test", to: "echo", payload: "fast", timeout_ms: 5000}.to_json
+      body = {from: "test", to: "arcana:echo", payload: "fast", timeout_ms: 5000}.to_json
       resp = HTTP::Client.post("http://127.0.0.1:14001/request", headers: headers, body: body)
       resp.status_code.should eq(200)
     ensure

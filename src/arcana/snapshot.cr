@@ -107,13 +107,11 @@ module Arcana
     private def self.restore_listings(directory : Directory, raw : JSON::Any?) : Nil
       return unless raw
       raw.as_a.each do |entry|
-        address = entry["address"].as_s
-        kind = entry["kind"]?.try(&.as_s?) == "service" ? Directory::Kind::Service : Directory::Kind::Agent
+        address = Directory.migrate_legacy_address(entry["address"].as_s)
         listing = Directory::Listing.new(
-          address: Directory.bare_name(address),
-          name: entry["name"]?.try(&.as_s?) || Directory.bare_name(address),
+          address: address,
+          name: entry["name"]?.try(&.as_s?) || address,
           description: entry["description"]?.try(&.as_s?) || "",
-          kind: kind,
           schema: entry["schema"]?,
           guide: entry["guide"]?.try(&.as_s?),
           tags: entry["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
@@ -122,7 +120,7 @@ module Arcana
           directory.register(listing)
           if last_seen_raw = entry["last_seen"]?.try(&.as_s?)
             ts = (Time.parse_rfc3339(last_seen_raw) rescue nil)
-            directory.set_last_seen(Directory.qualify(Directory.bare_name(address), kind), ts) if ts
+            directory.set_last_seen(address, ts) if ts
           end
         end
       end
@@ -131,7 +129,7 @@ module Arcana
     private def self.restore_mailboxes(bus : Bus, raw : JSON::Any?) : Nil
       return unless raw
       raw.as_a.each do |entry|
-        address = entry["address"].as_s
+        address = Directory.migrate_legacy_address(entry["address"].as_s)
         mb = bus.mailbox(address)
 
         messages = entry["messages"]?.try(&.as_a?.try(&.map { |m| Envelope.from_json(m.to_json) })) || [] of Envelope
@@ -161,7 +159,7 @@ module Arcana
       return unless raw
       tokens = {} of String => String
       raw.as_a.each do |entry|
-        addr = entry["address"].as_s
+        addr = Directory.migrate_legacy_address(entry["address"].as_s)
         tok = entry["token"].as_s
         tokens[addr] = tok
       end

@@ -15,7 +15,6 @@ describe Arcana::Client do
     client = Arcana::Client.new(
       url: "ws://127.0.0.1:14200/bus",
       address: "shopperbot",
-      kind: Arcana::Directory::Kind::Agent,
       name: "Shopperbot",
       description: "test client",
     )
@@ -27,8 +26,8 @@ describe Arcana::Client do
 
       # Server side — send an envelope directly into the client's mailbox.
       bus.send(Arcana::Envelope.new(
-        from: "origin:agent",
-        to: "shopperbot:agent",
+        from: "origin",
+        to: "shopperbot",
         subject: "hello",
         payload: JSON::Any.new("world"),
       ))
@@ -50,12 +49,11 @@ describe Arcana::Client do
     server.start_in_background
 
     # Local recipient (mailbox on the server-side bus).
-    target = bus.mailbox("sink:agent")
+    target = bus.mailbox("sink")
 
     client = Arcana::Client.new(
       url: "ws://127.0.0.1:14201/bus",
       address: "sender",
-      kind: Arcana::Directory::Kind::Agent,
     )
 
     begin
@@ -63,8 +61,8 @@ describe Arcana::Client do
       sleep 100.milliseconds
 
       client.send(Arcana::Envelope.new(
-        from: "sender:agent",
-        to: "sink:agent",
+        from: "sender",
+        to: "sink",
         subject: "ping",
         payload: JSON::Any.new("ping-data"),
       ))
@@ -87,7 +85,7 @@ describe Arcana::Client do
     # Echo service answers on the server side.
     svc = Arcana::Service.new(
       bus: bus, directory: dir,
-      address: "echo",
+      address: "arcana:echo",
       name: "Echo",
       description: "echoes",
     ) { |data| data }
@@ -99,7 +97,6 @@ describe Arcana::Client do
     client = Arcana::Client.new(
       url: "ws://127.0.0.1:14202/bus",
       address: "caller",
-      kind: Arcana::Directory::Kind::Agent,
     )
 
     begin
@@ -108,8 +105,8 @@ describe Arcana::Client do
 
       reply = client.request(
         Arcana::Envelope.new(
-          from: "caller:agent",
-          to: "echo:service",
+          from: "caller",
+          to: "arcana:echo",
           subject: "test",
           payload: JSON::Any.new("hello echo"),
         ),

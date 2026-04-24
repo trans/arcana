@@ -158,7 +158,6 @@ dir.register(Arcana::Directory::Listing.new(
   address: "arcana",
   name: "Arcana",
   description: "Provider-agnostic AI communication library for Crystal. Arcana provides unified interfaces for chat completion, image generation, text-to-speech, and embeddings, plus an agent-to-agent communication bus with pub/sub, request/response, and OTP-style supervision.",
-  kind: Arcana::Directory::Kind::Agent,
   guide: arcana_guide,
   tags: ["ai", "crystal", "library", "chat", "image", "tts", "embed", "bus", "agents"],
 ))
@@ -168,7 +167,7 @@ bus.mailbox("arcana")
 # Echo service — useful for testing the bus.
 echo = Arcana::Service.new(
   bus: bus, directory: dir,
-  address: "echo",
+  address: "arcana:echo",
   name: "Echo",
   description: "Echoes back whatever you send. Useful for testing bus connectivity.",
   guide: "Send any payload and it will be returned as-is in a result response. No schema required.",
@@ -181,7 +180,7 @@ registry_schema = JSON.parse(%({"type":"object","properties":{"domain":{"type":"
 
 registry_svc = Arcana::Service.new(
   bus: bus, directory: dir,
-  address: "registry",
+  address: "arcana:registry",
   name: "Provider Registry",
   description: "Lists available AI providers by domain (chat, image, tts, embed).",
   schema: registry_schema,
@@ -212,7 +211,7 @@ markdown_schema = JSON.parse(%({"type":"object","properties":{"text":{"type":"st
 
 markdown_svc = Arcana::Service.new(
   bus: bus, directory: dir,
-  address: "markdown",
+  address: "arcana:markdown",
   name: "Markdown Converter",
   description: "Converts Markdown to HTML or ANSI terminal output.",
   schema: markdown_schema,
@@ -250,7 +249,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
 
   chat_openai_svc = Arcana::Service.new(
     bus: bus, directory: dir,
-    address: "chat:openai",
+    address: "openai:chat",
     name: "OpenAI Chat",
     description: "Chat completion via OpenAI-compatible API.",
     schema: chat_openai_schema,
@@ -299,7 +298,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
 
   embed_svc = Arcana::Service.new(
     bus: bus, directory: dir,
-    address: "embed:openai",
+    address: "openai:embed",
     name: "OpenAI Embeddings",
     description: "Generate text embeddings via OpenAI.",
     schema: embed_schema,
@@ -333,7 +332,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
 
   tts_svc = Arcana::Service.new(
     bus: bus, directory: dir,
-    address: "tts:openai",
+    address: "openai:tts",
     name: "OpenAI Text-to-Speech",
     description: "Synthesize speech from text via OpenAI.",
     schema: tts_schema,
@@ -377,7 +376,7 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
 
   chat_anthropic_svc = Arcana::Service.new(
     bus: bus, directory: dir,
-    address: "chat:anthropic",
+    address: "anthropic:chat",
     name: "Anthropic Chat",
     description: "Chat completion via Anthropic Messages API.",
     schema: chat_anthropic_schema,
@@ -429,7 +428,7 @@ if google_key = ENV["GOOGLE_API_KEY"]?
 
   chat_gemini_svc = Arcana::Service.new(
     bus: bus, directory: dir,
-    address: "chat:gemini",
+    address: "gemini:chat",
     name: "Gemini Chat",
     description: "Chat completion via Google Gemini API.",
     schema: chat_gemini_schema,
@@ -481,7 +480,7 @@ if runware_key = ENV["RUNWARE_API_KEY"]?
 
   image_svc = Arcana::Service.new(
     bus: bus, directory: dir,
-    address: "image:runware",
+    address: "runware:image",
     name: "Runware Image Generator",
     description: "Generate images using FLUX models via Runware.",
     schema: image_schema,

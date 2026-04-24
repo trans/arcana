@@ -1,3 +1,28 @@
+arcana (0.14.0-1) unstable; urgency=medium
+
+  * BREAKING: new address scheme. Agents are plain names ("alice").
+    Services are "owner:capability" ("arcana:echo", "openai:chat",
+    "alice:memo"). Reads possessively: left owns right.
+  * Drop redundant :agent / :service suffixes from all addresses.
+  * Kind is now derived from address syntax (colon = service).
+  * Built-in services re-addressed: arcana:echo, arcana:markdown,
+    arcana:registry, openai:chat, openai:tts, openai:embed,
+    anthropic:chat, gemini:chat, runware:image.
+  * Snapshot loader auto-migrates pre-0.14 addresses. Tolerance
+    will be removed in 0.15.
+  * Depends on arcana-core ~> 0.2.0.
+
+ -- trans <transfire@gmail.com>  Fri, 24 Apr 2026 00:00:00 +0000
+
+arcana (0.13.0-1) unstable; urgency=medium
+
+  * Factor bus types (Envelope, Protocol, Directory, Mailbox, Bus,
+    Service, base Error) into separate arcana-core shard.
+  * Arcana::Client (WebSocket client) added in arcana-core.
+  * No API breaks for consumers using Arcana:: types directly.
+
+ -- trans <transfire@gmail.com>  Tue, 21 Apr 2026 00:00:00 +0000
+
 arcana (0.12.3-1) unstable; urgency=medium
 
   * Add TTL-based pruning for stale agent listings and mailboxes

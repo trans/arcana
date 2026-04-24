@@ -29,7 +29,7 @@ describe Arcana::Supervisor do
     actor = EchoActor.new(bus, dir, "sup-echo", "Echo", "Echo")
     sup.supervise(actor)
 
-    sup.children.should eq(["sup-echo:agent"])
+    sup.children.should eq(["sup-echo"])
     dir.lookup("sup-echo").should_not be_nil
   end
 

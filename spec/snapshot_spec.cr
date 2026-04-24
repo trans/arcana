@@ -29,24 +29,24 @@ describe Arcana::Snapshot do
 
     # Register a service and create its mailbox
     dir.register(Arcana::Directory::Listing.new(
-      address: "echo", name: "Echo", description: "echoes",
-      kind: Arcana::Directory::Kind::Service, tags: ["test"],
+      address: "arcana:echo", name: "Echo", description: "echoes",
+      tags: ["test"],
     ))
-    mb = bus.mailbox("echo:service")
+    mb = bus.mailbox("arcana:echo")
 
     # Deliver three messages
-    e1 = Arcana::Envelope.new(from: "alice:agent", to: "echo:service",
+    e1 = Arcana::Envelope.new(from: "alice", to: "arcana:echo",
       subject: "first", payload: JSON::Any.new("one"))
-    e2 = Arcana::Envelope.new(from: "alice:agent", to: "echo:service",
+    e2 = Arcana::Envelope.new(from: "alice", to: "arcana:echo",
       subject: "second", payload: JSON::Any.new("two"))
-    e3 = Arcana::Envelope.new(from: "alice:agent", to: "echo:service",
+    e3 = Arcana::Envelope.new(from: "alice", to: "arcana:echo",
       subject: "third", payload: JSON::Any.new("three"))
     mb.deliver(e1)
     mb.deliver(e2)
     mb.deliver(e3)
 
     # Freeze the middle one
-    mb.freeze(e2.correlation_id, "soapbox:agent").should be_true
+    mb.freeze(e2.correlation_id, "soapbox").should be_true
     mb.pending.should eq(2)
     mb.frozen_count.should eq(1)
 
@@ -64,10 +64,10 @@ describe Arcana::Snapshot do
 
       # Listings restored
       dir2.list.size.should eq(1)
-      dir2.lookup("echo:service").not_nil!.name.should eq("Echo")
+      dir2.lookup("arcana:echo").not_nil!.name.should eq("Echo")
 
       # Mailbox restored with the right messages and frozen state
-      mb2 = bus2.mailbox("echo:service")
+      mb2 = bus2.mailbox("arcana:echo")
       mb2.pending.should eq(2)
       mb2.frozen_count.should eq(1)
 
@@ -94,7 +94,7 @@ describe Arcana::Snapshot do
     dir = Arcana::Directory.new
     bus.directory = dir
     server = Arcana::Server.new(bus, dir, port: 14103)
-    server.load_tokens({"alice:agent" => "secret123", "bob:agent" => "swordfish"})
+    server.load_tokens({"alice" => "secret123", "bob" => "swordfish"})
 
     path = File.tempname("arcana-snap", ".json")
     begin
@@ -107,8 +107,8 @@ describe Arcana::Snapshot do
 
       Arcana::Snapshot.load(bus2, dir2, server2, path).should be_true
       server2.tokens.size.should eq(2)
-      server2.tokens["alice:agent"].should eq("secret123")
-      server2.tokens["bob:agent"].should eq("swordfish")
+      server2.tokens["alice"].should eq("secret123")
+      server2.tokens["bob"].should eq("swordfish")
     ensure
       File.delete(path) if File.exists?(path)
     end
@@ -149,9 +149,8 @@ describe Arcana::Snapshot do
     # Register but never deliver to it
     dir.register(Arcana::Directory::Listing.new(
       address: "ghost", name: "Ghost", description: "no messages",
-      kind: Arcana::Directory::Kind::Agent,
     ))
-    bus.mailbox("ghost:agent")
+    bus.mailbox("ghost")
 
     path = File.tempname("arcana-snap", ".json")
     begin
@@ -174,9 +173,8 @@ describe Arcana::Snapshot do
 
     dir1.register(Arcana::Directory::Listing.new(
       address: "offline", name: "Offline", description: "agent that's gone home",
-      kind: Arcana::Directory::Kind::Agent,
     ))
-    bus1.mailbox("offline:agent") # exists but empty
+    bus1.mailbox("offline") # exists but empty
 
     path = File.tempname("arcana-snap", ".json")
     begin
@@ -191,13 +189,13 @@ describe Arcana::Snapshot do
       Arcana::Snapshot.load(bus2, dir2, server2, path)
 
       # The listing is back
-      dir2.lookup("offline:agent").should_not be_nil
+      dir2.lookup("offline").should_not be_nil
       # And the mailbox is back too, so sends to the offline agent queue
-      bus2.has_mailbox?("offline:agent").should be_true
+      bus2.has_mailbox?("offline").should be_true
 
-      bus2.mailbox("sender:agent") # need a sender mailbox for the envelope
-      bus2.send(Arcana::Envelope.new(from: "sender:agent", to: "offline:agent", subject: "ping"))
-      bus2.pending("offline:agent").should eq(1)
+      bus2.mailbox("sender") # need a sender mailbox for the envelope
+      bus2.send(Arcana::Envelope.new(from: "sender", to: "offline", subject: "ping"))
+      bus2.pending("offline").should eq(1)
     ensure
       File.delete(path) if File.exists?(path)
     end

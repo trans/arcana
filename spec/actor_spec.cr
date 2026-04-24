@@ -50,6 +50,7 @@ describe Arcana::Actor do
     listing = dir.lookup("echo")
     listing.should_not be_nil
     listing.not_nil!.kind.should eq(Arcana::Directory::Kind::Agent)
+    listing.not_nil!.address.should eq("echo")
 
     result = bus.request(
       Arcana::Envelope.new(from: "tester", to: "echo",

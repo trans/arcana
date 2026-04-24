@@ -2,7 +2,7 @@ version: 2.0
 shards:
   arcana-core:
     git: https://github.com/trans/arcana-core.git
-    version: 0.1.0
+    version: 0.2.0
 
   baked_file_system:
     git: https://github.com/ralsina/baked_file_system.git
@@ -14,7 +14,7 @@ shards:
 
   crimage:
     git: https://github.com/naqvis/crimage.git
-    version: 1.0.4+git.commit.b65f67df27f4cb8807a34d94a90dfd4162acf45a
+    version: 1.0.5+git.commit.2b3abbcdca426a2a13a39b986326f9a2f7f65bc6
 
   docopt:
     git: https://github.com/ralsina/docopt.cr.git

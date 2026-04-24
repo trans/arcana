@@ -35,12 +35,11 @@ module Arcana
       @model : String = "",
       @temperature : Float64 = 0.7,
       @max_tokens : Int32 = 1024,
-      kind : Directory::Kind = Directory::Kind::Agent,
       schema : JSON::Any? = nil,
       guide : String? = nil,
       tags : Array(String) = [] of String,
     )
-      super(bus, directory, address, name, description, kind, schema, guide, tags)
+      super(bus, directory, address, name, description, schema, guide, tags)
       @conversations = {} of String => Chat::History
     end
 

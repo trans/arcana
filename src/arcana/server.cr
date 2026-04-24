@@ -69,8 +69,7 @@ module Arcana
 
     private def check_sender!(from : String)
       return if from.empty?
-      resolved = @directory.resolve?(from) || from
-      raise "sender '#{from}' is not registered" unless @bus.has_mailbox?(resolved)
+      raise "sender '#{from}' is not registered" unless @bus.has_mailbox?(from)
     end
 
     private def save_state
@@ -86,10 +85,10 @@ module Arcana
       raise "unauthorized" unless given == expected
     end
 
-    # Resolve an address to its qualified form via the directory.
-    # Falls back to the raw address if no listing exists (e.g. reply mailboxes).
+    # Post-0.14: addresses are their own canonical form. This helper is a
+    # no-op kept for call-site stability; callers could use `address` directly.
     private def resolve_addr(address : String) : String
-      @directory.resolve?(address) || address
+      address
     end
 
     private def handle_rest(ctx : HTTP::Server::Context)
@@ -181,31 +180,28 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
-
-      kind = parsed["kind"]?.try(&.as_s?) == "service" ? Directory::Kind::Service : Directory::Kind::Agent
-      qualified = Directory.qualify(address, kind)
+      Directory.validate_address(address)
 
       # Store token if provided (agent-chosen shared secret)
       if token = parsed["token"]?.try(&.as_s?)
-        @tokens[qualified] = token unless token.empty?
+        @tokens[address] = token unless token.empty?
       end
 
-      # Create mailbox with qualified address
-      @bus.mailbox(qualified)
+      # Create mailbox
+      @bus.mailbox(address)
 
       # Register in directory
       @directory.register(Directory::Listing.new(
         address: address,
-        name: parsed["name"]?.try(&.as_s?) || Directory.bare_name(address),
+        name: parsed["name"]?.try(&.as_s?) || address,
         description: parsed["description"]?.try(&.as_s?) || "",
-        kind: kind,
         schema: parsed["schema"]?,
         guide: parsed["guide"]?.try(&.as_s?),
         tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
       ))
       save_state
 
-      ctx.response.print %({"ok":true,"address":"#{qualified}"})
+      ctx.response.print %({"ok":true,"address":"#{address}"})
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})
@@ -216,15 +212,14 @@ module Arcana
       address = parsed["address"]?.try(&.as_s?) || ""
       raise "address required" if address.empty?
 
-      resolved = @directory.resolve?(address) || address
-      check_token!(resolved, parsed)
+      check_token!(address, parsed)
 
-      @directory.unregister(resolved)
-      @bus.remove_mailbox(resolved)
-      @tokens.delete(resolved)
+      @directory.unregister(address)
+      @bus.remove_mailbox(address)
+      @tokens.delete(address)
       save_state
 
-      ctx.response.print %({"ok":true,"address":"#{resolved}"})
+      ctx.response.print %({"ok":true,"address":"#{address}"})
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})
@@ -540,27 +535,24 @@ module Arcana
             when "join"
               raw_addr = parsed["address"]?.try(&.as_s?)
               next unless raw = raw_addr
-
-              kind = parsed["kind"]?.try(&.as_s?) == "service" ? Directory::Kind::Service : Directory::Kind::Agent
-              qualified = Directory.qualify(raw, kind)
+              Directory.validate_address(raw)
 
               # Register in directory unless already present (allows reconnection
               # after restart when state was loaded from disk).
-              unless @directory.lookup(qualified)
+              unless @directory.lookup(raw)
                 @directory.register(Directory::Listing.new(
                   address: raw,
-                  name: parsed["name"]?.try(&.as_s?) || Directory.bare_name(raw),
+                  name: parsed["name"]?.try(&.as_s?) || raw,
                   description: parsed["description"]?.try(&.as_s?) || "",
-                  kind: kind,
                   tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
                 ))
               end
 
               # Create mailbox on local bus
-              mailbox = @bus.mailbox(qualified)
-              address = qualified
+              mailbox = @bus.mailbox(raw)
+              address = raw
 
-              @mutex.synchronize { @connections[qualified] = ws }
+              @mutex.synchronize { @connections[raw] = ws }
 
               # Forward bus messages to WebSocket
               forwarder = spawn do
