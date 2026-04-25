@@ -12,9 +12,21 @@ module Arcana
   module Snapshot
     VERSION = 1
 
-    # Write the full bus state to `path` atomically (tmp + rename).
+    # Write the full bus state via the supplied StateBackend.
+    # The backend is responsible for atomicity and durability semantics.
+    def self.save(bus : Bus, directory : Directory, server : Server, backend : StateBackend) : Nil
+      json = build_json(bus, directory, server)
+      backend.save(json)
+    end
+
+    # Path-taking convenience wrapper. Constructs a LocalFileBackend on
+    # the fly. Existing callers that pass a path keep working.
     def self.save(bus : Bus, directory : Directory, server : Server, path : String) : Nil
-      json = JSON.build do |j|
+      save(bus, directory, server, LocalFileBackend.new(path))
+    end
+
+    private def self.build_json(bus : Bus, directory : Directory, server : Server) : String
+      JSON.build do |j|
         j.object do
           j.field "version", VERSION
           j.field "saved_at", Time.utc.to_rfc3339
@@ -78,17 +90,15 @@ module Arcana
           end
         end
       end
-
-      tmp = "#{path}.tmp"
-      File.write(tmp, json)
-      File.rename(tmp, path) # atomic on POSIX
     end
 
-    # Restore bus state from `path`. Returns true if loaded, false if
-    # the file does not exist. Raises on malformed JSON.
-    def self.load(bus : Bus, directory : Directory, server : Server, path : String) : Bool
-      return false unless File.exists?(path)
-      parsed = JSON.parse(File.read(path))
+    # Restore bus state from the supplied StateBackend.
+    # Returns true if state was loaded, false if the backend has no
+    # saved state. Raises on malformed JSON.
+    def self.load(bus : Bus, directory : Directory, server : Server, backend : StateBackend) : Bool
+      raw = backend.load
+      return false unless raw
+      parsed = JSON.parse(raw)
 
       restore_listings(directory, parsed["listings"]?)
       restore_mailboxes(bus, parsed["mailboxes"]?)
@@ -102,6 +112,11 @@ module Arcana
       end
 
       true
+    end
+
+    # Path-taking convenience wrapper.
+    def self.load(bus : Bus, directory : Directory, server : Server, path : String) : Bool
+      load(bus, directory, server, LocalFileBackend.new(path))
     end
 
     private def self.restore_listings(directory : Directory, raw : JSON::Any?) : Nil

@@ -634,6 +634,7 @@ end
 # -- Construct server (needed before snapshot load for token restoration) --
 
 snapshot_file = File.join(state_dir, "state.json")
+state_backend = Arcana::LocalFileBackend.new(snapshot_file)
 server = Arcana::Server.new(bus, dir, host: host, port: port, state_file: state_file)
 server.events = events_backend
 
@@ -642,7 +643,7 @@ server.events = events_backend
 restored = 0
 restored_messages = 0
 unless fresh
-  if Arcana::Snapshot.load(bus, dir, server, snapshot_file)
+  if Arcana::Snapshot.load(bus, dir, server, state_backend)
     restored = dir.list.size
     bus.addresses.each { |a| restored_messages += bus.pending(a) }
   elsif File.exists?(state_file)
@@ -664,7 +665,7 @@ shutdown = ->(sig : Signal) do
     metadata: {"signal" => JSON::Any.new(sig.to_s)} of String => JSON::Any,
   ))
   begin
-    Arcana::Snapshot.save(bus, dir, server, snapshot_file)
+    Arcana::Snapshot.save(bus, dir, server, state_backend)
     msg_count = 0
     bus.addresses.each { |a| msg_count += bus.pending(a) }
     STDERR.puts "  Saved #{dir.list.size} listings, #{msg_count} pending messages to #{snapshot_file}"

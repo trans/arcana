@@ -1,3 +1,16 @@
+arcana (0.16.0-1) unstable; urgency=medium
+
+  * Snapshot now goes through Arcana::StateBackend instead of writing
+    files directly. Default backend (LocalFileBackend) preserves the
+    current behavior — single file, atomic tmp+rename. Future
+    Postgres or S3 backends drop in without touching Snapshot.
+  * Default event-log sweep interval bumped from 6h to 24h. Lower it
+    via ARCANA_EVENT_SWEEP_INTERVAL if you set a strict
+    ARCANA_EVENT_MAX_SIZE_MB.
+  * Depends on arcana-core ~> 0.4.0.
+
+ -- trans <transfire@gmail.com>  Sat, 25 Apr 2026 00:00:00 +0000
+
 arcana (0.15.0-1) unstable; urgency=medium
 
   * Append-only event log: every material bus action (registrations,

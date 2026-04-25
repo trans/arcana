@@ -1,6 +1,34 @@
 require "./spec_helper"
 
 describe Arcana::Snapshot do
+  it "save/load round-trips through an explicit StateBackend" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+    bus.directory = dir
+    server = Arcana::Server.new(bus, dir, port: 14120)
+
+    dir.register(Arcana::Directory::Listing.new(
+      address: "arcana:echo", name: "Echo", description: "echoes",
+    ))
+
+    path = File.tempname("arcana-snap", ".json")
+    backend = Arcana::LocalFileBackend.new(path)
+    begin
+      Arcana::Snapshot.save(bus, dir, server, backend)
+      backend.exists?.should be_true
+
+      bus2 = Arcana::Bus.new
+      dir2 = Arcana::Directory.new
+      bus2.directory = dir2
+      server2 = Arcana::Server.new(bus2, dir2, port: 14121)
+
+      Arcana::Snapshot.load(bus2, dir2, server2, backend).should be_true
+      dir2.lookup("arcana:echo").not_nil!.name.should eq("Echo")
+    ensure
+      File.delete(path) if File.exists?(path)
+    end
+  end
+
   it "saves and loads an empty bus" do
     bus = Arcana::Bus.new
     dir = Arcana::Directory.new
