@@ -200,18 +200,23 @@ module Arcana
         @tokens[address] = token unless token.empty?
       end
 
-      # Create mailbox
+      # Create mailbox (always — sender check requires has_mailbox?)
       @bus.mailbox(address)
 
-      # Register in directory
-      @directory.register(Directory::Listing.new(
-        address: address,
-        name: parsed["name"]?.try(&.as_s?) || address,
-        description: parsed["description"]?.try(&.as_s?) || "",
-        schema: parsed["schema"]?,
-        guide: parsed["guide"]?.try(&.as_s?),
-        tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
-      ))
+      # Register in directory unless caller opted out (e.g. pure consumers
+      # that send/subscribe but never accept addressed messages).
+      listed = parsed["listed"]?.try(&.as_bool?)
+      listed = true if listed.nil?
+      if listed
+        @directory.register(Directory::Listing.new(
+          address: address,
+          name: parsed["name"]?.try(&.as_s?) || address,
+          description: parsed["description"]?.try(&.as_s?) || "",
+          schema: parsed["schema"]?,
+          guide: parsed["guide"]?.try(&.as_s?),
+          tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
+        ))
+      end
       save_state
 
       ctx.response.print %({"ok":true,"address":"#{address}"})
@@ -573,9 +578,14 @@ module Arcana
               next unless raw = raw_addr
               Directory.validate_address(raw)
 
+              # Caller can opt out of directory listing (pure consumers that
+              # send/subscribe but never accept addressed messages).
+              listed = parsed["listed"]?.try(&.as_bool?)
+              listed = true if listed.nil?
+
               # Register in directory unless already present (allows reconnection
               # after restart when state was loaded from disk).
-              unless @directory.lookup(raw)
+              if listed && !@directory.lookup(raw)
                 @directory.register(Directory::Listing.new(
                   address: raw,
                   name: parsed["name"]?.try(&.as_s?) || raw,

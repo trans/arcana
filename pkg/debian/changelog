@@ -1,3 +1,16 @@
+arcana (0.17.0-1) unstable; urgency=medium
+
+  * Add `listed: false` to /register and the WebSocket join frame.
+    Pure consumers (web apps, scripts) can now register a mailbox
+    without polluting the directory with an entry nobody will look up.
+  * MCP arcana_register tool gains `listed` param.
+  * Snapshot loader drops legacy "<name>:service" entries instead of
+    rewriting them to "<name>:legacy" — preserving stale entries
+    under a fake owner was misleading. Re-register cleanly.
+  * Depends on arcana-core ~> 0.5.1.
+
+ -- trans <transfire@gmail.com>  Sun, 26 Apr 2026 00:00:00 +0000
+
 arcana (0.16.0-1) unstable; urgency=medium
 
   * Snapshot now goes through Arcana::StateBackend instead of writing

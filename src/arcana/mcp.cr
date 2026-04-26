@@ -78,6 +78,7 @@ module Arcana
             description: {type: "string", description: "What you do (for the directory)"},
             guide:       {type: "string", description: "How-to guide for interacting with you"},
             tags:        {type: "array", items: {type: "string"}, description: "Tags for discovery"},
+            listed:      {type: "boolean", description: "Whether to add a directory listing. Default true. Set false for pure consumers that send/subscribe but don't accept addressed messages — they get a mailbox but stay invisible to discovery."},
           },
           required: ["address"],
         },
@@ -341,6 +342,7 @@ module Arcana
           description: args["description"]?.try(&.as_s?),
           guide:       args["guide"]?.try(&.as_s?),
           tags:        args["tags"]?,
+          listed:      args["listed"]?.try(&.as_bool?),
         }.to_json
         result = http_post("/register", body)
 

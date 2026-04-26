@@ -77,6 +77,31 @@ describe Arcana::Client do
     end
   end
 
+  it "joins as a hidden consumer (listed: false) — mailbox without directory entry" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+    bus.directory = dir
+    server = Arcana::Server.new(bus, dir, port: 14210)
+    server.start_in_background
+
+    client = Arcana::Client.new(
+      url: "ws://127.0.0.1:14210/bus",
+      address: "wow-io",
+      listed: false,
+    )
+
+    begin
+      spawn { client.connect }
+      sleep 100.milliseconds
+
+      bus.has_mailbox?("wow-io").should be_true
+      dir.lookup("wow-io").should be_nil
+    ensure
+      client.close
+      server.stop
+    end
+  end
+
   it "performs a request/reply round-trip via correlation_id" do
     bus = Arcana::Bus.new
     dir = Arcana::Directory.new

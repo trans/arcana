@@ -190,6 +190,38 @@ describe Arcana::Server do
     end
   end
 
+  describe "POST /register listed=false" do
+    it "creates a mailbox without adding a directory listing" do
+      bus = Arcana::Bus.new
+      dir = Arcana::Directory.new
+      server = Arcana::Server.new(bus, dir, port: 14400)
+      server.start_in_background
+
+      begin
+        headers = HTTP::Headers{"Content-Type" => "application/json"}
+
+        # Hidden registration
+        body = {address: "wow-io", listed: false}.to_json
+        resp = HTTP::Client.post("http://127.0.0.1:14400/register", headers: headers, body: body)
+        resp.status_code.should eq(200)
+
+        # Mailbox exists (so the sender check passes)
+        bus.has_mailbox?("wow-io").should be_true
+
+        # Directory listing does NOT exist
+        dir.lookup("wow-io").should be_nil
+
+        # Default behavior (no listed flag) still creates a listing
+        body = {address: "alice"}.to_json
+        resp = HTTP::Client.post("http://127.0.0.1:14400/register", headers: headers, body: body)
+        resp.status_code.should eq(200)
+        dir.lookup("alice").should_not be_nil
+      ensure
+        server.stop
+      end
+    end
+  end
+
   describe "GET /events" do
     it "returns events when a backend is attached" do
       dir_path = File.tempname("arcana-events-rest")
