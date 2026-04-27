@@ -1,3 +1,17 @@
+arcana (0.18.0-1) unstable; urgency=medium
+
+  * Identity / org / API key foundation (stage 1 of 3 for SaaS auth).
+  * New optional Postgres dependency, configured via
+    ARCANA_DATABASE_URL. When unset, no behavior change — current
+    single-tenant localhost users keep working.
+  * New tables: orgs, users, memberships, api_keys.
+  * New CLI: arcana-admin (migrate, org/user/member/key subcommands).
+  * Server-side auth enforcement intentionally deferred to stage 2.
+  * SQL migrations install to /usr/share/arcana/db/migrations/.
+  * Adds runtime dep: pg ~> 0.29.0 (will/crystal-pg).
+
+ -- trans <transfire@gmail.com>  Mon, 27 Apr 2026 00:00:00 +0000
+
 arcana (0.17.0-1) unstable; urgency=medium
 
   * Add `listed: false` to /register and the WebSocket join frame.

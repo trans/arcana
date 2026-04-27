@@ -1,5 +1,5 @@
 name: arcana
-version: 0.17.0
+version: 0.18.0
 
 authors:
   - Thomas Sawyer <transfire@gmail.com>
@@ -12,6 +12,9 @@ dependencies:
   arcana-core:
     github: trans/arcana-core
     version: ~> 0.5.1
+  pg:
+    github: will/crystal-pg
+    version: ~> 0.29.0
   markd:
     github: icyleaf/markd
   markterm:
@@ -22,3 +25,5 @@ targets:
     main: bin/arcana.cr
   arcana-mcp:
     main: bin/arcana-mcp.cr
+  arcana-admin:
+    main: bin/arcana-admin.cr

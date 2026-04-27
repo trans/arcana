@@ -1,6 +1,6 @@
 # Maintainer: trans <transfire@gmail.com>
 pkgname=arcana
-pkgver=0.17.0
+pkgver=0.18.0
 pkgrel=1
 pkgdesc="Agent communication bus and AI provider library"
 arch=('x86_64')
@@ -25,16 +25,23 @@ sha256sums=('SKIP')
 build() {
   cd "${pkgname}-${pkgver}"
   shards install --production
-  crystal build --release --no-debug bin/arcana.cr -o bin/arcana
-  crystal build --release --no-debug bin/arcana-mcp.cr -o bin/arcana-mcp
+  crystal build --release --no-debug bin/arcana.cr       -o bin/arcana
+  crystal build --release --no-debug bin/arcana-mcp.cr   -o bin/arcana-mcp
+  crystal build --release --no-debug bin/arcana-admin.cr -o bin/arcana-admin
 }
 
 package() {
   cd "${pkgname}-${pkgver}"
 
   # Binaries
-  install -Dm755 bin/arcana     "${pkgdir}/usr/bin/arcana"
-  install -Dm755 bin/arcana-mcp "${pkgdir}/usr/bin/arcana-mcp"
+  install -Dm755 bin/arcana       "${pkgdir}/usr/bin/arcana"
+  install -Dm755 bin/arcana-mcp   "${pkgdir}/usr/bin/arcana-mcp"
+  install -Dm755 bin/arcana-admin "${pkgdir}/usr/bin/arcana-admin"
+
+  # SQL migrations (read by arcana-admin migrate)
+  for f in db/migrations/*.sql; do
+    install -Dm644 "$f" "${pkgdir}/usr/share/arcana/db/migrations/$(basename "$f")"
+  done
 
   # Helper scripts (bash)
   install -Dm755 bin/arcana-init "${pkgdir}/usr/bin/arcana-init"

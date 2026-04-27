@@ -530,6 +530,26 @@ bin/arcana serve --fresh
 - `ARCANA_EVENT_SWEEP_INTERVAL` — seconds between retention sweeps (default: `86400` / 24h)
 - `ARCANA_EVENT_LOG_DISABLE` — set to `1` to turn the event log off
 
+**Identity / org store** (Postgres-backed, opt-in for now):
+- `ARCANA_DATABASE_URL` — `postgres://user:pass@host:port/dbname`. Unset = no auth, current single-tenant behavior preserved. Set = required for `arcana-admin` and (in a future stage) for server auth enforcement.
+
+Bootstrap once Postgres is configured:
+
+```sh
+# Initialize the schema
+arcana-admin migrate
+
+# Create your first org and admin
+arcana-admin org create acme "Acme Corp"
+arcana-admin user create alice@acme.example --name Alice
+arcana-admin member add alice@acme.example acme owner
+
+# Mint an API key (secret printed once — store it)
+arcana-admin key create "Alice's CLI" --org acme
+```
+
+A platform admin key (no org, full system access) is created with `arcana-admin key create "Platform admin"` (no `--org`). Stage 2 will wire bearer-token auth into the server's REST and WebSocket endpoints; until then keys are recognized but not enforced.
+
 **Provider services** (registered when key is present):
 - `OPENAI_API_KEY` — enables chat:openai, embed:openai, tts:openai, image:openai
 - `ANTHROPIC_API_KEY` — enables chat:anthropic

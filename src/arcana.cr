@@ -46,7 +46,10 @@ require "./arcana/snapshot"
 require "./arcana/mcp"
 require "./arcana/markdown"
 require "./arcana/registry"
+require "./arcana/db"
+require "./arcana/db/migrate"
+require "./arcana/auth"
 
 module Arcana
-  VERSION = "0.17.0"
+  VERSION = "0.18.0"
 end
