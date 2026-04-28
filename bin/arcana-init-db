@@ -1,0 +1,158 @@
+#!/bin/bash
+#
+# arcana-init-db — interactive Postgres bootstrap for Arcana.
+#
+# What this does (in order):
+#   1. Verifies postgresql is installed and running (offers to start).
+#   2. Initializes the cluster if needed (Arch's default: empty data dir).
+#   3. Creates the database and role if missing; sets the role's password.
+#   4. Writes ARCANA_DATABASE_URL to /etc/arcana/arcana.env.
+#   5. Runs `arcana-admin migrate` to set up the schema.
+#   6. Optionally creates a platform admin API key.
+#   7. Optionally restarts arcana to pick up the new env.
+#
+# Idempotent: safe to re-run. Prompts before destructive-ish operations.
+#
+# Override defaults via env vars before running:
+#   ARCANA_DB_NAME, ARCANA_DB_USER, ARCANA_DB_HOST, ARCANA_DB_PORT,
+#   ARCANA_DB_PASSWORD, ARCANA_ENV_FILE
+#
+# Run as root (we touch /etc/arcana/ and use postgres-the-user).
+
+set -euo pipefail
+
+DB_NAME="${ARCANA_DB_NAME:-arcana}"
+DB_USER="${ARCANA_DB_USER:-arcana}"
+DB_HOST="${ARCANA_DB_HOST:-localhost}"
+DB_PORT="${ARCANA_DB_PORT:-5432}"
+DB_PASSWORD="${ARCANA_DB_PASSWORD:-}"
+ENV_FILE="${ARCANA_ENV_FILE:-/etc/arcana/arcana.env}"
+
+if [ "$EUID" -ne 0 ]; then
+  echo "This script writes to /etc/arcana/ and uses the postgres role."
+  echo "Re-run with sudo."
+  exit 1
+fi
+
+confirm() {
+  local prompt="$1"
+  read -p "$prompt [Y/n] " yn
+  [[ "$yn" != "n" && "$yn" != "N" ]]
+}
+
+run_psql() {
+  sudo -iu postgres psql -tAc "$1"
+}
+
+# --- 1. postgresql installed? ---
+
+if ! command -v psql >/dev/null 2>&1; then
+  echo "postgresql is not installed."
+  echo "Install with: sudo pacman -S postgresql"
+  exit 1
+fi
+
+# --- 2. cluster initialized? ---
+
+PG_DATA_DIR="${PG_DATA_DIR:-/var/lib/postgres/data}"
+if [ ! -f "$PG_DATA_DIR/PG_VERSION" ]; then
+  echo "Postgres data directory is empty: $PG_DATA_DIR"
+  if confirm "Initialize a new cluster there?"; then
+    sudo -iu postgres initdb -D "$PG_DATA_DIR"
+  else
+    echo "Cannot continue without an initialized cluster. Aborting."
+    exit 1
+  fi
+fi
+
+# --- 3. service running? ---
+
+if ! systemctl is-active --quiet postgresql; then
+  if confirm "postgresql.service is not running. Enable and start it?"; then
+    systemctl enable --now postgresql
+    sleep 1
+  else
+    echo "Cannot continue without postgres running. Aborting."
+    exit 1
+  fi
+fi
+
+# --- 4. password ---
+
+if [ -z "$DB_PASSWORD" ]; then
+  if command -v openssl >/dev/null 2>&1; then
+    DB_PASSWORD=$(openssl rand -base64 30 | tr -dc 'A-Za-z0-9' | head -c 32)
+  else
+    DB_PASSWORD=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)
+  fi
+  echo "Generated a random DB_PASSWORD (32 chars)."
+fi
+
+# --- 5. database + role ---
+
+if run_psql "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1; then
+  echo "Database '$DB_NAME' already exists. Reusing."
+else
+  echo "Creating database '$DB_NAME'..."
+  sudo -iu postgres createdb "$DB_NAME"
+fi
+
+if run_psql "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" | grep -q 1; then
+  echo "Role '$DB_USER' already exists. Updating password."
+  run_psql "ALTER USER \"$DB_USER\" WITH PASSWORD '$DB_PASSWORD';" >/dev/null
+else
+  echo "Creating role '$DB_USER'..."
+  run_psql "CREATE USER \"$DB_USER\" WITH PASSWORD '$DB_PASSWORD';" >/dev/null
+fi
+
+run_psql "GRANT ALL PRIVILEGES ON DATABASE \"$DB_NAME\" TO \"$DB_USER\";" >/dev/null
+sudo -iu postgres psql -d "$DB_NAME" -tAc "GRANT ALL ON SCHEMA public TO \"$DB_USER\";" >/dev/null
+
+DATABASE_URL="postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+
+# --- 6. env file ---
+
+mkdir -p "$(dirname "$ENV_FILE")"
+touch "$ENV_FILE"
+# Strip any prior ARCANA_DATABASE_URL line.
+sed -i '/^ARCANA_DATABASE_URL=/d' "$ENV_FILE"
+echo "ARCANA_DATABASE_URL=$DATABASE_URL" >> "$ENV_FILE"
+chmod 640 "$ENV_FILE"
+chown root:arcana "$ENV_FILE" 2>/dev/null || true
+echo "Wrote ARCANA_DATABASE_URL to $ENV_FILE"
+
+# --- 7. migrate ---
+
+if ! command -v arcana-admin >/dev/null 2>&1; then
+  echo "WARNING: arcana-admin not found in PATH. Skipping schema migration."
+  echo "Run 'arcana-admin migrate' manually once it's available."
+else
+  echo "Running schema migration..."
+  ARCANA_DATABASE_URL="$DATABASE_URL" arcana-admin migrate
+fi
+
+# --- 8. optional admin key ---
+
+if command -v arcana-admin >/dev/null 2>&1; then
+  if confirm "Create a platform admin API key now?"; then
+    echo ""
+    ARCANA_DATABASE_URL="$DATABASE_URL" arcana-admin key create "Platform admin"
+    echo ""
+    echo "==> Save the secret above somewhere safe. It will not be shown again."
+    echo ""
+  fi
+fi
+
+# --- 9. optional service restart ---
+
+if systemctl is-active --quiet arcana; then
+  if confirm "Restart the arcana service to pick up the new env?"; then
+    systemctl restart arcana
+    echo "arcana restarted."
+  fi
+fi
+
+echo ""
+echo "==> Setup complete."
+echo "==> ARCANA_DATABASE_URL is in $ENV_FILE"
+echo "==> Server-side enforcement of bearer tokens lands in stage 2."

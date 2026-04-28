@@ -1,6 +1,6 @@
 # Maintainer: trans <transfire@gmail.com>
 pkgname=arcana
-pkgver=0.18.0
+pkgver=0.18.1
 pkgrel=1
 pkgdesc="Agent communication bus and AI provider library"
 arch=('x86_64')
@@ -44,7 +44,8 @@ package() {
   done
 
   # Helper scripts (bash)
-  install -Dm755 bin/arcana-init "${pkgdir}/usr/bin/arcana-init"
+  install -Dm755 bin/arcana-init    "${pkgdir}/usr/bin/arcana-init"
+  install -Dm755 bin/arcana-init-db "${pkgdir}/usr/bin/arcana-init-db"
 
   # Systemd unit
   install -Dm644 pkg/debian/arcana.service \

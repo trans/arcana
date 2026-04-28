@@ -1,11 +1,14 @@
 post_install() {
-  # Ensure secrets file is readable by the arcana service
   chown root:arcana /etc/arcana/secrets.env 2>/dev/null
   chmod 640 /etc/arcana/secrets.env 2>/dev/null
 
   echo ""
-  echo "==> To configure API keys:  sudoedit /etc/arcana/secrets.env"
-  echo "==> To start the service:   sudo systemctl enable --now arcana"
+  echo "==> To configure API keys:    sudoedit /etc/arcana/secrets.env"
+  echo "==> To start the service:     sudo systemctl enable --now arcana"
+  echo ""
+  echo "==> OPTIONAL: identity / API-key auth (Postgres-backed)"
+  echo "==>   sudo arcana-init-db"
+  echo "==>   Without this, arcana runs in single-tenant localhost mode."
   echo ""
 }
 
@@ -14,7 +17,10 @@ post_upgrade() {
   chmod 640 /etc/arcana/secrets.env 2>/dev/null
 
   echo ""
-  echo "==> Check for new keys:     diff /etc/arcana/secrets.env /usr/share/doc/arcana/secrets.env.example"
-  echo "==> Restart if needed:      sudo systemctl restart arcana"
+  echo "==> Check for new keys:    diff /etc/arcana/secrets.env /usr/share/doc/arcana/secrets.env.example"
+  echo "==> Restart if needed:     sudo systemctl restart arcana"
+  echo ""
+  echo "==> Database migrations run automatically on service restart"
+  echo "==> when ARCANA_DATABASE_URL is configured."
   echo ""
 }

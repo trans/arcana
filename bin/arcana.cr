@@ -54,6 +54,22 @@ state_file = File.join(state_dir, "directory.json")
 
 Dir.mkdir_p(state_dir) unless Dir.exists?(state_dir)
 
+# -- Postgres migrations (when ARCANA_DATABASE_URL is set) --
+# Idempotent. Future releases that add new SQL files migrate automatically
+# on package upgrade + service restart. If migration fails, fail loud.
+if Arcana::DB.enabled?
+  begin
+    applied = Arcana::DB::Migrate.run
+    unless applied.empty?
+      STDERR.puts "Database: applied #{applied.size} pending migration#{applied.size == 1 ? "" : "s"}:"
+      applied.each { |f| STDERR.puts "  #{f}" }
+    end
+  rescue ex
+    STDERR.puts "FATAL: database migration failed: #{ex.message}"
+    exit 1
+  end
+end
+
 # -- Event log --
 # Audit log of material bus actions (registrations, sends, publishes,
 # freezes, auth failures, lifecycle). Opt-out by setting

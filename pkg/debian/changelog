@@ -1,3 +1,19 @@
+arcana (0.18.1-1) unstable; urgency=medium
+
+  * arcana now auto-runs pending migrations on startup when
+    ARCANA_DATABASE_URL is set. Future schema changes ship via
+    db/migrations/*.sql and apply on the next service restart.
+    Migration failure is fatal (loud, easy to diagnose).
+  * New helper script: arcana-init-db. Interactive Postgres bootstrap:
+    starts the cluster, creates the database and role, writes
+    ARCANA_DATABASE_URL into /etc/arcana/arcana.env, runs migrate,
+    optionally creates a platform admin key. Idempotent; re-runs are
+    safe.
+  * Install hook now mentions arcana-init-db as the optional path
+    to enable auth.
+
+ -- trans <transfire@gmail.com>  Mon, 28 Apr 2026 00:00:00 +0000
+
 arcana (0.18.0-1) unstable; urgency=medium
 
   * Identity / org / API key foundation (stage 1 of 3 for SaaS auth).
