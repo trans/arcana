@@ -271,4 +271,143 @@ describe Arcana::Server do
       end
     end
   end
+
+  # Bearer-token auth specs require a real Postgres test database so
+  # api_keys can be created. Pending without ARCANA_TEST_DATABASE_URL.
+  if test_url = ENV["ARCANA_TEST_DATABASE_URL"]?
+    describe "bearer-token auth (ARCANA_AUTH_REQUIRED)" do
+      around_each do |example|
+        ENV["ARCANA_DATABASE_URL"] = test_url
+        Arcana::DB.close
+        db = Arcana::DB.connection!
+        db.exec "DROP TABLE IF EXISTS api_keys CASCADE"
+        db.exec "DROP TABLE IF EXISTS memberships CASCADE"
+        db.exec "DROP TABLE IF EXISTS users CASCADE"
+        db.exec "DROP TABLE IF EXISTS orgs CASCADE"
+        db.exec "DROP TABLE IF EXISTS schema_migrations CASCADE"
+        Arcana::DB::Migrate.run
+        example.run
+      ensure
+        Arcana::DB.close
+      end
+
+      it "rejects REST requests without an Authorization header" do
+        bus = Arcana::Bus.new
+        dir = Arcana::Directory.new
+        server = Arcana::Server.new(bus, dir, port: 14400)
+        server.auth_required = true
+        server.start_in_background
+        begin
+          resp = HTTP::Client.get("http://127.0.0.1:14400/directory")
+          resp.status_code.should eq(401)
+          resp.headers["WWW-Authenticate"]?.should eq("Bearer")
+        ensure
+          server.stop
+        end
+      end
+
+      it "rejects REST requests with a bad token" do
+        bus = Arcana::Bus.new
+        dir = Arcana::Directory.new
+        server = Arcana::Server.new(bus, dir, port: 14401)
+        server.auth_required = true
+        server.start_in_background
+        begin
+          headers = HTTP::Headers{"Authorization" => "Bearer ak_definitely_not_real"}
+          resp = HTTP::Client.get("http://127.0.0.1:14401/directory", headers: headers)
+          resp.status_code.should eq(401)
+        ensure
+          server.stop
+        end
+      end
+
+      it "rejects REST requests with a revoked key" do
+        org = Arcana::Auth::Org.create(slug: "acme", name: "Acme")
+        key, secret = Arcana::Auth::ApiKey.create(name: "ci", org_id: org.id)
+        key.revoke
+
+        bus = Arcana::Bus.new
+        dir = Arcana::Directory.new
+        server = Arcana::Server.new(bus, dir, port: 14402)
+        server.auth_required = true
+        server.start_in_background
+        begin
+          headers = HTTP::Headers{"Authorization" => "Bearer #{secret}"}
+          resp = HTTP::Client.get("http://127.0.0.1:14402/directory", headers: headers)
+          resp.status_code.should eq(401)
+        ensure
+          server.stop
+        end
+      end
+
+      it "accepts REST requests with a valid bearer token" do
+        org = Arcana::Auth::Org.create(slug: "acme", name: "Acme")
+        _key, secret = Arcana::Auth::ApiKey.create(name: "ci", org_id: org.id)
+
+        bus = Arcana::Bus.new
+        dir = Arcana::Directory.new
+        server = Arcana::Server.new(bus, dir, port: 14403)
+        server.auth_required = true
+        server.start_in_background
+        begin
+          headers = HTTP::Headers{"Authorization" => "Bearer #{secret}"}
+          resp = HTTP::Client.get("http://127.0.0.1:14403/directory", headers: headers)
+          resp.status_code.should eq(200)
+        ensure
+          server.stop
+        end
+      end
+
+      it "always allows /health, even without a token" do
+        bus = Arcana::Bus.new
+        dir = Arcana::Directory.new
+        server = Arcana::Server.new(bus, dir, port: 14404)
+        server.auth_required = true
+        server.start_in_background
+        begin
+          resp = HTTP::Client.get("http://127.0.0.1:14404/health")
+          resp.status_code.should eq(200)
+        ensure
+          server.stop
+        end
+      end
+
+      it "leaves anonymous access intact when auth_required is false" do
+        bus = Arcana::Bus.new
+        dir = Arcana::Directory.new
+        server = Arcana::Server.new(bus, dir, port: 14405)
+        server.start_in_background
+        begin
+          resp = HTTP::Client.get("http://127.0.0.1:14405/directory")
+          resp.status_code.should eq(200)
+        ensure
+          server.stop
+        end
+      end
+
+      it "rejects WebSocket upgrades without a valid token" do
+        bus = Arcana::Bus.new
+        dir = Arcana::Directory.new
+        server = Arcana::Server.new(bus, dir, port: 14406)
+        server.auth_required = true
+        server.start_in_background
+        begin
+          # Send an upgrade-style request without auth; the handler must
+          # return 401 instead of completing the upgrade.
+          headers = HTTP::Headers{
+            "Upgrade"               => "websocket",
+            "Connection"            => "Upgrade",
+            "Sec-WebSocket-Key"     => "dGhlIHNhbXBsZSBub25jZQ==",
+            "Sec-WebSocket-Version" => "13",
+          }
+          resp = HTTP::Client.get("http://127.0.0.1:14406/bus", headers: headers)
+          resp.status_code.should eq(401)
+        ensure
+          server.stop
+        end
+      end
+    end
+  else
+    pending "bearer-token auth (set ARCANA_TEST_DATABASE_URL to run)"
+  end
 end

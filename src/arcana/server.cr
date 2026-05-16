@@ -35,6 +35,12 @@ module Arcana
     # Optional event recorder for auth failures and server lifecycle.
     property events : Events::Backend?
 
+    # When true, every REST request (except /health) and every WebSocket
+    # upgrade must present a valid `Authorization: Bearer ak_...` header
+    # that resolves via Arcana::Auth::ApiKey.verify. Requires the identity
+    # store (ARCANA_DATABASE_URL).
+    property auth_required : Bool = false
+
     def initialize(
       @bus : Bus,
       @directory : Directory,
@@ -47,7 +53,7 @@ module Arcana
     # Start the server. Blocks.
     def start
       server = HTTP::Server.new([
-        WebSocketHandler.new(@bus, @directory),
+        WebSocketHandler.new(@bus, @directory, auth_required: @auth_required, events: @events),
       ]) do |ctx|
         handle_rest(ctx)
       end
@@ -101,7 +107,44 @@ module Arcana
       address
     end
 
+    # Extract and verify a bearer token from the Authorization header.
+    # Returns the matching ApiKey or nil.
+    private def verify_bearer(ctx : HTTP::Server::Context) : Auth::ApiKey?
+      header = ctx.request.headers["Authorization"]?
+      return nil unless header
+      return nil unless header.starts_with?("Bearer ")
+      token = header[7..].strip
+      return nil if token.empty?
+      Auth::ApiKey.verify(token)
+    end
+
+    # Enforce bearer-token auth on REST requests when @auth_required is set.
+    # Returns true if the request may proceed, false if a 401 has been written.
+    # /health is always exempt so liveness probes work without credentials.
+    private def enforce_rest_auth!(ctx : HTTP::Server::Context) : Bool
+      return true unless @auth_required
+      return true if ctx.request.path == "/health"
+      if verify_bearer(ctx)
+        true
+      else
+        @events.try &.record(Events::Event.new(
+          type: "auth.failed",
+          subject: ctx.request.path,
+          metadata: {
+            "reason"    => JSON::Any.new("missing or invalid bearer token"),
+            "transport" => JSON::Any.new("rest"),
+          } of String => JSON::Any,
+        ))
+        ctx.response.status = HTTP::Status::UNAUTHORIZED
+        ctx.response.headers["WWW-Authenticate"] = "Bearer"
+        ctx.response.content_type = "application/json"
+        ctx.response.print %({"error":"unauthorized"})
+        false
+      end
+    end
+
     private def handle_rest(ctx : HTTP::Server::Context)
+      return unless enforce_rest_auth!(ctx)
       ctx.response.content_type = "application/json"
       path = ctx.request.path
 
@@ -543,13 +586,34 @@ module Arcana
     private class WebSocketHandler
       include HTTP::Handler
 
-      def initialize(@bus : Bus, @directory : Directory)
+      def initialize(
+        @bus : Bus,
+        @directory : Directory,
+        @auth_required : Bool = false,
+        @events : Events::Backend? = nil,
+      )
         @connections = {} of String => HTTP::WebSocket
         @mutex = Mutex.new
       end
 
       def call(context : HTTP::Server::Context)
         if websocket_request?(context) && context.request.path == "/bus"
+          unless authorized?(context)
+            @events.try &.record(Events::Event.new(
+              type: "auth.failed",
+              subject: "/bus",
+              metadata: {
+                "reason"    => JSON::Any.new("missing or invalid bearer token"),
+                "transport" => JSON::Any.new("websocket"),
+              } of String => JSON::Any,
+            ))
+            context.response.status = HTTP::Status::UNAUTHORIZED
+            context.response.headers["WWW-Authenticate"] = "Bearer"
+            context.response.content_type = "application/json"
+            context.response.print %({"error":"unauthorized"})
+            return
+          end
+
           ws = HTTP::WebSocketHandler.new do |socket|
             handle_connection(socket)
           end
@@ -557,6 +621,16 @@ module Arcana
         else
           call_next(context)
         end
+      end
+
+      private def authorized?(ctx : HTTP::Server::Context) : Bool
+        return true unless @auth_required
+        header = ctx.request.headers["Authorization"]?
+        return false unless header
+        return false unless header.starts_with?("Bearer ")
+        token = header[7..].strip
+        return false if token.empty?
+        !Arcana::Auth::ApiKey.verify(token).nil?
       end
 
       private def websocket_request?(ctx : HTTP::Server::Context) : Bool

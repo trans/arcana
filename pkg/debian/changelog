@@ -1,3 +1,24 @@
+arcana (0.19.0-1) unstable; urgency=medium
+
+  * Server-side bearer-token auth (stage 2 of 3 for SaaS auth).
+    Set ARCANA_AUTH_REQUIRED=1 to require a valid
+    `Authorization: Bearer ak_...` header on every REST call and
+    WebSocket upgrade. /health remains open for liveness probes.
+    Requires ARCANA_DATABASE_URL — the server refuses to start with
+    auth enabled and no identity store.
+  * Auth is fully opt-in. With ARCANA_AUTH_REQUIRED unset, the bus
+    behaves exactly as before — anonymous access, single-tenant
+    localhost. No breaking change for existing deployments.
+  * Failed auth attempts are recorded as `auth.failed` events
+    (transport=rest|websocket) for audit.
+  * arcana-mcp bridge now forwards ARCANA_API_KEY as a bearer token
+    on every HTTP call, so MCP clients work against an
+    auth-enforcing server.
+  * Per-listing / per-org tenancy isolation intentionally deferred
+    to stage 3.
+
+ -- trans <transfire@gmail.com>  Sat, 16 May 2026 00:00:00 +0000
+
 arcana (0.18.1-1) unstable; urgency=medium
 
   * arcana now auto-runs pending migrations on startup when

@@ -654,6 +654,19 @@ state_backend = Arcana::LocalFileBackend.new(snapshot_file)
 server = Arcana::Server.new(bus, dir, host: host, port: port, state_file: state_file)
 server.events = events_backend
 
+# -- Bearer-token auth (opt-in) --
+#
+# Set ARCANA_AUTH_REQUIRED=1 to require a valid `Authorization: Bearer ak_...`
+# header on every REST call and WebSocket upgrade (except /health). Keys are
+# created via `arcana-admin key create`. This requires ARCANA_DATABASE_URL.
+if ENV["ARCANA_AUTH_REQUIRED"]? == "1"
+  unless Arcana::DB.enabled?
+    STDERR.puts "FATAL: ARCANA_AUTH_REQUIRED=1 requires ARCANA_DATABASE_URL to be set"
+    exit 1
+  end
+  server.auth_required = true
+end
+
 # -- Restore persisted state --
 
 restored = 0
@@ -758,6 +771,7 @@ STDERR.puts "  WebSocket: ws://#{host}:#{port}/bus"
 STDERR.puts "  REST:      http://#{host}:#{port}/directory"
 STDERR.puts "  Health:    http://#{host}:#{port}/health"
 STDERR.puts "  Restored:  #{restored} listings, #{restored_messages} pending messages" if restored > 0
+STDERR.puts "  Auth:      #{server.auth_required ? "ENFORCED (bearer token)" : "disabled"}"
 STDERR.puts "  Services:  #{live_services.empty? ? "(none)" : live_services.join(", ")}"
 STDERR.puts "  Agents:    #{live_agents.empty? ? "(none)" : live_agents.join(", ")}"
 STDERR.puts "  Directory: #{dir.list.size} listings"
