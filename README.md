@@ -561,6 +561,8 @@ For the MCP bridge, set `ARCANA_API_KEY=ak_...` in your MCP server's environment
 
 Per-listing / per-org isolation (so org A can't see org B's agents) lands in stage 3.
 
+Full operator recipe (init-db → org → key → enforce → test): [doc/AUTH.md](doc/AUTH.md).
+
 **Provider services** (registered when key is present):
 - `OPENAI_API_KEY` — enables chat:openai, embed:openai, tts:openai, image:openai
 - `ANTHROPIC_API_KEY` — enables chat:anthropic
