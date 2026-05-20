@@ -5,8 +5,9 @@
 
 override_dh_auto_build:
 	shards install --production
-	crystal build --release --no-debug bin/arcana.cr -o bin/arcana
-	crystal build --release --no-debug bin/arcana-mcp.cr -o bin/arcana-mcp
+	crystal build --release --no-debug bin/arcana.cr       -o bin/arcana
+	crystal build --release --no-debug bin/arcana-mcp.cr   -o bin/arcana-mcp
+	crystal build --release --no-debug bin/arcana-admin.cr -o bin/arcana-admin
 
 override_dh_auto_install:
 	dh_auto_install

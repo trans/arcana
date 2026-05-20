@@ -1,5 +1,8 @@
 bin/arcana                     usr/bin/
 bin/arcana-mcp                  usr/bin/
+bin/arcana-admin                usr/bin/
 bin/arcana-init                 usr/bin/
+bin/arcana-init-db              usr/bin/
+db/migrations/*.sql             usr/share/arcana/db/migrations/
 debian/arcana.env               etc/arcana/
 debian/secrets.env.example      usr/share/doc/arcana/
