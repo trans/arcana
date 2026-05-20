@@ -1,3 +1,22 @@
+arcana (0.19.1-1) unstable; urgency=medium
+
+  * Fix migration runner: it used crystal-pg's prepared exec which is
+    one-statement-only, so any migration file with more than one SQL
+    statement (e.g. the init_auth schema with its 4 tables + indexes)
+    failed at apply time with "cannot insert multiple commands into
+    a prepared statement". Now splits on `;` and runs each statement
+    in the same transaction.
+  * Fix migration directory resolution: previously preferred
+    $CWD/db/migrations even when empty, which silently masked a
+    real install. Now prefers /usr/share/arcana/db/migrations and
+    only falls back to CWD when running from a source checkout
+    (shard.yml present).
+  * No schema changes. Existing 0.19.0 deployments with the manually
+    applied init_auth schema will see `schema_migrations` filled in
+    on next migrate (no-op for the table contents).
+
+ -- trans <transfire@gmail.com>  Wed, 20 May 2026 00:00:00 +0000
+
 arcana (0.19.0-1) unstable; urgency=medium
 
   * Server-side bearer-token auth (stage 2 of 3 for SaaS auth).
