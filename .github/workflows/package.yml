@@ -5,6 +5,11 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Opt every JS action into Node 24 ahead of the forced 2026-06-02 cutover,
+# so failures surface here instead of on a release day.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   arch:
     name: Arch Linux (.pkg.tar.zst)
