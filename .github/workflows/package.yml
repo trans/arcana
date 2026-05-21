@@ -7,44 +7,40 @@ on:
 
 jobs:
   arch:
-    name: Arch Linux (PKGBUILD)
+    name: Arch Linux (.pkg.tar.zst)
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Crystal and runtime libs
+      - name: Install build dependencies
         run: |
-          pacman -Syu --noconfirm crystal shards
-          pacman -S --noconfirm openssl pcre2 gc gcc-libs zlib make gcc
+          # Pre-install every PKGBUILD dep so makepkg never has to call
+          # pacman itself (would require sudo). base-devel already brings
+          # gcc, gcc-libs, make, fakeroot, etc.
+          pacman -Syu --noconfirm --needed \
+            crystal shards git sudo \
+            openssl pcre2 gc zlib
+          # makepkg refuses to run as root; build under an unprivileged user.
+          useradd -m builder
+          chown -R builder:builder .
 
-      - name: Build
+      - name: Build with makepkg
         run: |
-          shards install --production
-          crystal build --release --no-debug bin/arcana.cr -o bin/arcana
-          crystal build --release --no-debug bin/arcana-mcp.cr -o bin/arcana-mcp
+          cd pkg
+          sudo -u builder makepkg --noconfirm
 
-      - name: Stage package tree
+      - name: Collect package
         run: |
           mkdir -p dist
-          install -Dm755 bin/arcana     dist/usr/bin/arcana
-          install -Dm755 bin/arcana-mcp dist/usr/bin/arcana-mcp
-          install -Dm755 bin/arcana-init dist/usr/bin/arcana-init
-          install -Dm644 pkg/debian/arcana.service \
-            dist/usr/lib/systemd/system/arcana.service
-          install -Dm640 pkg/debian/arcana.env dist/etc/arcana/arcana.env
-          install -Dm644 LICENSE dist/usr/share/licenses/arcana/LICENSE
-          printf 'u arcana - "Arcana agent bus service" /nonexistent /usr/sbin/nologin\n' \
-            | install -Dm644 /dev/stdin dist/usr/lib/sysusers.d/arcana.conf
-          printf 'd /var/lib/arcana 0750 arcana arcana -\n' \
-            | install -Dm644 /dev/stdin dist/usr/lib/tmpfiles.d/arcana.conf
-          cd dist && tar czf ../arcana-${GITHUB_REF_NAME:-dev}-x86_64-arch.tar.gz *
+          mv pkg/arcana-*.pkg.tar.zst dist/
+          ls -la dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: arcana-arch
-          path: arcana-*-arch.tar.gz
+          path: dist/arcana-*.pkg.tar.zst
 
   deb:
     name: Debian Package
