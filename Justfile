@@ -28,6 +28,18 @@ mcp url="http://127.0.0.1:19118":
 clean:
     rm -rf docs/api/ lib/ bin/arcana bin/arcana-mcp
 
+# Build the Arch .pkg.tar.zst via makepkg. Output left in pkg/.
+pkg:
+    cd pkg && rm -rf src pkg arcana-*.tar.gz *.pkg.tar.zst
+    cd pkg && makepkg -f
+
+# Build the Arch package, install it via pacman, and restart arcana.
+# Requires sudo.
+install-pkg: pkg
+    sudo pacman -U --noconfirm pkg/arcana-[0-9]*-x86_64.pkg.tar.zst
+    sudo systemctl restart arcana
+    @echo "Installed. Verify with: arcana --version && systemctl status arcana"
+
 # One-shot install as a system service (creates arcana user, deploys binary,
 # installs systemd unit). Run once to set up. Requires sudo.
 install: build
