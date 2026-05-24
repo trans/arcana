@@ -1,3 +1,20 @@
+arcana (0.19.2-1) unstable; urgency=medium
+
+  * anthropic:chat now accepts a `web_search: true` flag. When set,
+    Claude can search the web during its response (the model decides
+    when/whether). The response shape is unchanged — ask in the
+    prompt for whatever format you want (e.g. JSON with a `url`
+    field). Useful for fact lookup, finding canonical URLs, current
+    events.
+  * MCP server now returns an `instructions` field in the initialize
+    response — a one-time workflow briefing ("register first, then
+    deliver/receive, use arcana_directory for discovery") that the
+    client carries as standing context. Tool descriptions stay
+    focused on per-tool behavior instead of repeatedly explaining
+    the same setup.
+
+ -- trans <transfire@gmail.com>  Sun, 24 May 2026 00:00:00 +0000
+
 arcana (0.19.1-1) unstable; urgency=medium
 
   * Fix migration runner: it used crystal-pg's prepared exec which is

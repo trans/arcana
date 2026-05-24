@@ -13,6 +13,44 @@ module Arcana
   class MCP
     PROTOCOL_VERSION = "2024-11-05"
 
+    # Returned in the MCP initialize response so the client sees a single
+    # workflow-level briefing for the bus, instead of every tool description
+    # re-explaining the same setup. Keep terse — this lives in every
+    # conversation's context for the lifetime of the session.
+    SERVER_INSTRUCTIONS = <<-MD
+      Arcana is a persistent agent communication bus. Use these tools to
+      send messages, discover services, and coordinate with other agents
+      and AI providers.
+
+      **Workflow (in order):**
+
+      1. **Register first** with `arcana_register` (`address`: your agent
+         name). The bus rejects sends from unregistered addresses. Pure
+         consumers (you only send, never receive direct messages) should
+         pass `listed: false`.
+      2. **Discover** what's available with `arcana_directory`. Returns
+         all agents and services on the bus, with their descriptions,
+         schemas, and usage guides. `arcana_directory address:"<name>"`
+         looks up one entry (read its `guide` field for usage).
+      3. **Send** with `arcana_deliver`. `ordering: auto` (default)
+         resolves by target kind — services block for a reply, agents are
+         fire-and-forget. Override with `ordering: sync` or `async`.
+      4. **Receive** async replies with `arcana_receive` (yourself as
+         `address`). `arcana_inbox` peeks without consuming.
+
+      **Addressing:**
+      - Agents: plain names (`alice`)
+      - Services: `owner:capability` (`openai:chat`, `arcana:echo`)
+
+      **Heads up:** `arcana:registry` is the *AI provider* registry — it
+      returns providers per domain (chat/image/tts/embed). For bus-level
+      discovery (who's on the bus?), use the `arcana_directory` tool, not
+      this service.
+
+      **Help for any service:** send `_intent: "help"` in the payload to
+      get its guide and schema back.
+      MD
+
     # Registered addresses we know about (for resource listing).
     @registered = [] of String
     # Active resource subscriptions — address => true.
@@ -198,7 +236,8 @@ module Arcana
             tools:     {} of String => String,
             resources: {subscribe: true, listChanged: true},
           },
-          serverInfo: {name: "arcana", version: Arcana::VERSION},
+          serverInfo:   {name: "arcana", version: Arcana::VERSION},
+          instructions: SERVER_INSTRUCTIONS,
         })
 
       when "notifications/initialized"

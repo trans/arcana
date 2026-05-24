@@ -408,13 +408,13 @@ end
 
 if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
   chat_anthropic = Arcana::Chat::Anthropic.new(api_key: anthropic_key)
-  chat_anthropic_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: claude-sonnet-4-20250514)"},"temperature":{"type":"number","description":"Sampling temperature (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"}},"required":["messages"]}))
+  chat_anthropic_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: claude-sonnet-4-20250514)"},"temperature":{"type":"number","description":"Sampling temperature (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"web_search":{"type":"boolean","description":"If true, Claude can search the web during its response. Useful for fact lookup, finding URLs, or anything needing current information. The model decides when/whether to search. Default: false."}},"required":["messages"]}))
 
   chat_anthropic_svc = Arcana::Service.new(
     bus: bus, directory: dir,
     address: "anthropic:chat",
     name: "Anthropic Chat",
-    description: "Chat completion via Anthropic Messages API.",
+    description: "Chat completion via Anthropic Messages API. Supports optional web search.",
     schema: chat_anthropic_schema,
     guide: <<-GUIDE,
     Send a messages array to get a chat completion from Claude.
@@ -426,13 +426,18 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
       model: "claude-sonnet-4-20250514" (default), "claude-opus-4-20250514", etc.
       temperature: 0.0-1.0 (default 0.7)
       max_tokens: response limit (default 4096)
+      web_search: true to let Claude search the web during its response.
+                  The model decides when/whether to use it. Useful for
+                  fact lookup, finding canonical URLs, current events.
+                  Ask in the prompt for the response shape you want
+                  (e.g. "return only a JSON object with a 'url' field").
 
     System messages are extracted and sent as top-level system parameter.
 
     Returns: {"content": "...", "model": "...", "finish_reason": "...",
               "prompt_tokens": N, "completion_tokens": N}
     GUIDE
-    tags: ["chat", "llm", "anthropic", "claude"],
+    tags: ["chat", "llm", "anthropic", "claude", "web"],
   ) do |data|
     msgs = data["messages"].as_a.map do |m|
       Arcana::Chat::Message.new(
@@ -440,11 +445,16 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
         content: m["content"]?.try(&.as_s?),
       )
     end
+    server_tools = nil
+    if data["web_search"]?.try(&.as_bool?)
+      server_tools = [Arcana::Chat::ServerTool.web_search] of Arcana::Chat::ServerTool
+    end
     request = Arcana::Chat::Request.new(
       messages: msgs,
       model: data["model"]?.try(&.as_s?) || "",
       temperature: data["temperature"]?.try(&.as_f?) || 0.7,
       max_tokens: data["max_tokens"]?.try(&.as_i?) || 4096,
+      server_tools: server_tools,
     )
     response = chat_anthropic.complete(request)
     JSON::Any.new({
