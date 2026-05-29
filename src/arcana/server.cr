@@ -358,7 +358,7 @@ module Arcana
         ctx.response.print %({"ok":true})
       else
         ctx.response.status = HTTP::Status::NOT_FOUND
-        ctx.response.print %({"error":"no mailbox for address: #{envelope.to}"})
+        ctx.response.print error_with_suggestion(envelope.to, "no mailbox for address: #{envelope.to}")
       end
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
@@ -366,26 +366,113 @@ module Arcana
     end
 
     private def handle_post_deliver(ctx : HTTP::Server::Context)
-      parsed = JSON.parse(ctx.request.body.not_nil!)
-      envelope = envelope_from_json(parsed)
-      check_sender!(envelope.from)
-      timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
-      timeout = timeout_ms.milliseconds
+      failed_addr = ""
+      begin
+        parsed = JSON.parse(ctx.request.body.not_nil!)
+        envelope = envelope_from_json(parsed)
+        failed_addr = envelope.to
+        check_sender!(envelope.from)
+        timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
+        timeout = timeout_ms.milliseconds
 
-      # Use strict deliver (raises if no mailbox). Silent drops are worse
-      # than an error — callers need to know when a message didn't land.
-      reply, resolved = @bus.deliver(envelope, timeout: timeout)
-      if reply
-        ctx.response.print reply.to_json
-      else
-        ctx.response.print %({"ok":true,"ordering":"#{resolved.to_s.downcase}","correlation_id":"#{envelope.correlation_id}"})
+        # Use strict deliver (raises if no mailbox). Silent drops are worse
+        # than an error — callers need to know when a message didn't land.
+        reply, resolved = @bus.deliver(envelope, timeout: timeout)
+        if reply
+          ctx.response.print reply.to_json
+        else
+          ctx.response.print %({"ok":true,"ordering":"#{resolved.to_s.downcase}","correlation_id":"#{envelope.correlation_id}"})
+        end
+      rescue ex : Arcana::Error
+        ctx.response.status = HTTP::Status::NOT_FOUND
+        ctx.response.print error_with_suggestion(failed_addr, ex.message || "delivery failed")
+      rescue ex
+        ctx.response.status = HTTP::Status::BAD_REQUEST
+        ctx.response.print %({"error":"#{ex.message}"})
       end
-    rescue ex : Arcana::Error
-      ctx.response.status = HTTP::Status::NOT_FOUND
-      ctx.response.print %({"error":"#{ex.message}"})
-    rescue ex
-      ctx.response.status = HTTP::Status::BAD_REQUEST
-      ctx.response.print %({"error":"#{ex.message}"})
+    end
+
+    # Build a JSON error body. When the failed address resembles something
+    # in the directory, attach a structured `did_you_mean` hint and mention
+    # it in the human-readable error string.
+    private def error_with_suggestion(failed_addr : String, msg : String) : String
+      suggestion = closest_listing(failed_addr)
+      if s = suggestion
+        full_msg = "#{msg} Did you mean '#{s.address}' (#{s.name})?"
+        {
+          "error"        => full_msg,
+          "did_you_mean" => {
+            "address"     => s.address,
+            "name"        => s.name,
+            "description" => s.description,
+          },
+        }.to_json
+      else
+        {"error" => msg}.to_json
+      end
+    end
+
+    # Find the directory listing whose address most closely resembles the
+    # failed one. Returns nil if no candidate clears the similarity threshold
+    # — better to give no suggestion than a misleading one.
+    private SIMILARITY_THRESHOLD = 0.5
+
+    private def closest_listing(addr : String) : Directory::Listing?
+      return nil if addr.empty?
+      listings = @directory.list
+      return nil if listings.empty?
+
+      best : Directory::Listing? = nil
+      best_score = 0.0_f64
+      listings.each do |listing|
+        next if listing.address == addr # exact match wouldn't be a failure
+        score = address_similarity(addr, listing.address)
+        if score > best_score
+          best_score = score
+          best = listing
+        end
+      end
+      best_score >= SIMILARITY_THRESHOLD ? best : nil
+    end
+
+    # Combined similarity score for two short addresses:
+    # - exact match → 1.0
+    # - one contains the other → boosted by length ratio (catches "memo" vs
+    #   "memo-bot")
+    # - otherwise → Levenshtein-normalized ratio (catches typos)
+    private def address_similarity(a : String, b : String) : Float64
+      return 1.0 if a == b
+      return 0.0 if a.empty? || b.empty?
+      if a.includes?(b) || b.includes?(a)
+        # Substring containment is strong signal — floor at 0.5 so a
+        # contained address always beats the similarity threshold, then
+        # scale up with how much of the longer string is shared.
+        longer, shorter = a.size > b.size ? {a, b} : {b, a}
+        return shorter.size.to_f64 / longer.size.to_f64 * 0.5 + 0.5
+      end
+      dist = levenshtein(a, b)
+      max_len = {a.size, b.size}.max
+      1.0 - (dist.to_f64 / max_len.to_f64)
+    end
+
+    private def levenshtein(a : String, b : String) : Int32
+      m = a.size
+      n = b.size
+      return n if m == 0
+      return m if n == 0
+
+      prev = Array(Int32).new(n + 1) { |i| i }
+      curr = Array(Int32).new(n + 1, 0)
+
+      m.times do |i|
+        curr[0] = i + 1
+        n.times do |j|
+          cost = a[i] == b[j] ? 0 : 1
+          curr[j + 1] = {curr[j] + 1, prev[j + 1] + 1, prev[j] + cost}.min
+        end
+        prev, curr = curr, prev
+      end
+      prev[n]
     end
 
     private def handle_post_request(ctx : HTTP::Server::Context)

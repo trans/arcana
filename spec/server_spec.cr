@@ -272,6 +272,86 @@ describe Arcana::Server do
     end
   end
 
+  describe "did_you_mean on delivery failure" do
+    it "suggests the closest registered address on /send miss" do
+      bus = Arcana::Bus.new
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "memo",
+        name: "Memo",
+        description: "Semantic search and vector storage",
+      ))
+      bus.mailbox("memo")
+      bus.mailbox("client")
+
+      server = Arcana::Server.new(bus, dir, port: 14500)
+      server.start_in_background
+      begin
+        headers = HTTP::Headers{"Content-Type" => "application/json"}
+        body = {from: "client", to: "memo-agent", payload: "lost"}.to_json
+        resp = HTTP::Client.post("http://127.0.0.1:14500/send", headers: headers, body: body)
+        resp.status_code.should eq(404)
+        parsed = JSON.parse(resp.body)
+        parsed["error"].as_s.should contain("Did you mean 'memo'")
+        parsed["did_you_mean"]["address"].as_s.should eq("memo")
+        parsed["did_you_mean"]["name"].as_s.should eq("Memo")
+      ensure
+        server.stop
+      end
+    end
+
+    it "suggests on /deliver miss too" do
+      bus = Arcana::Bus.new
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "openai:chat",
+        name: "OpenAI Chat",
+        description: "Chat completion via OpenAI.",
+      ))
+      bus.mailbox("openai:chat")
+      bus.mailbox("client")
+
+      server = Arcana::Server.new(bus, dir, port: 14501)
+      server.start_in_background
+      begin
+        headers = HTTP::Headers{"Content-Type" => "application/json"}
+        body = {from: "client", to: "openai:chats", payload: nil}.to_json
+        resp = HTTP::Client.post("http://127.0.0.1:14501/deliver", headers: headers, body: body)
+        resp.status_code.should eq(404)
+        parsed = JSON.parse(resp.body)
+        parsed["did_you_mean"]["address"].as_s.should eq("openai:chat")
+      ensure
+        server.stop
+      end
+    end
+
+    it "returns no suggestion when nothing is close enough" do
+      bus = Arcana::Bus.new
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "alice",
+        name: "Alice",
+        description: "an agent",
+      ))
+      bus.mailbox("alice")
+      bus.mailbox("client")
+
+      server = Arcana::Server.new(bus, dir, port: 14502)
+      server.start_in_background
+      begin
+        headers = HTTP::Headers{"Content-Type" => "application/json"}
+        body = {from: "client", to: "zzzzzz", payload: nil}.to_json
+        resp = HTTP::Client.post("http://127.0.0.1:14502/send", headers: headers, body: body)
+        resp.status_code.should eq(404)
+        parsed = JSON.parse(resp.body)
+        parsed["error"].as_s.should_not contain("Did you mean")
+        parsed["did_you_mean"]?.should be_nil
+      ensure
+        server.stop
+      end
+    end
+  end
+
   # Bearer-token auth specs require a real Postgres test database so
   # api_keys can be created. Pending without ARCANA_TEST_DATABASE_URL.
   if test_url = ENV["ARCANA_TEST_DATABASE_URL"]?

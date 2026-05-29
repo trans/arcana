@@ -1,3 +1,18 @@
+arcana (0.19.3-1) unstable; urgency=medium
+
+  * /send and /deliver now suggest the closest registered address
+    when delivery fails for an unknown one. The 404 response includes
+    a structured `did_you_mean: {address, name, description}` field
+    and an updated human-readable error string ("...Did you mean 'X'
+    (Name)?"). Scoring is substring-containment-first, then
+    Levenshtein-normalized; below a similarity threshold the response
+    is unchanged. Addresses the recurring case where agents
+    re-register under different names and senders retry stale ones.
+  * MCP `initialize` instructions briefing now mentions the
+    `did_you_mean` field so agents react to it on delivery failure.
+
+ -- trans <transfire@gmail.com>  Thu, 28 May 2026 00:00:00 +0000
+
 arcana (0.19.2-1) unstable; urgency=medium
 
   * anthropic:chat now accepts a `web_search: true` flag. When set,

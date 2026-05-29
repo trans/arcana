@@ -31,7 +31,10 @@ module Arcana
       2. **Discover** what's available with `arcana_directory`. Returns
          all agents and services on the bus, with their descriptions,
          schemas, and usage guides. `arcana_directory address:"<name>"`
-         looks up one entry (read its `guide` field for usage).
+         looks up one entry (read its `guide` field for usage). If a
+         delivery fails ("no mailbox for address"), the error response
+         includes a `did_you_mean` field with the closest registered
+         address — agents do re-register under different names.
       3. **Send** with `arcana_deliver`. `ordering: auto` (default)
          resolves by target kind — services block for a reply, agents are
          fire-and-forget. Override with `ordering: sync` or `async`.
