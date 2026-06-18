@@ -40,6 +40,17 @@ install-pkg: pkg
     sudo systemctl restart arcana
     @echo "Installed. Verify with: arcana --version && systemctl status arcana"
 
+# Register arcana-mcp with Claude Code at user scope, so every Claude
+# instance on this machine gets it without per-repo .mcp.json. Requires
+# arcana-mcp on PATH (installed via `just install-pkg` or `just install`).
+# For an auth-enforcing server, append `-e ARCANA_API_KEY=ak_...`.
+mcp-add:
+    claude mcp add arcana --scope user -- arcana-mcp
+
+# Remove the user-scope arcana MCP registration.
+mcp-remove:
+    claude mcp remove arcana --scope user
+
 # One-shot install as a system service (creates arcana user, deploys binary,
 # installs systemd unit). Run once to set up. Requires sudo.
 install: build
