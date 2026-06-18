@@ -1,3 +1,18 @@
+arcana (0.19.4-1) unstable; urgency=medium
+
+  * New built-in service `arcana:help` — like 411 for the bus. Send an
+    empty payload to get the full workflow briefing (register, discover,
+    deliver, receive, addressing, errors). Optional `topic` param drills
+    into one section: workflow, addressing, discovery, errors. `topic:
+    "list"` returns the available topic names. Unknown topics return
+    the valid list in the error. Lets non-MCP bus clients self-onboard
+    without needing the MCP initialize briefing.
+  * Briefing text is now a shared `Arcana::Help::BRIEFING` constant
+    used by both the MCP initialize response and the arcana:help
+    service, so the two surfaces can't drift.
+
+ -- trans <transfire@gmail.com>  Wed, 18 Jun 2026 00:00:00 +0000
+
 arcana (0.19.3-1) unstable; urgency=medium
 
   * /send and /deliver now suggest the closest registered address

@@ -211,6 +211,44 @@ echo = Arcana::Service.new(
 ) { |data| data }
 echo.start
 
+# Help service — like 411. Returns the bus workflow briefing.
+# Same text as the MCP initialize briefing, kept in sync via Arcana::Help.
+help_schema = JSON.parse(%({"type":"object","properties":{"topic":{"type":"string","description":"Optional topic name. Omit for full briefing. Use 'list' for available topic names."}}}))
+
+help_svc = Arcana::Service.new(
+  bus: bus, directory: dir,
+  address: "arcana:help",
+  name: "Help",
+  description: "Workflow briefing for new bus clients. Like 411 — call when you don't know where to start.",
+  schema: help_schema,
+  guide: <<-GUIDE,
+  Get the bus workflow briefing — how to register, discover, send, receive.
+
+  Send: {} (or no payload)              → full briefing
+  Send: {"topic": "workflow"}           → just the workflow section
+  Send: {"topic": "addressing"}         → addressing rules
+  Send: {"topic": "discovery"}          → how to find services
+  Send: {"topic": "errors"}             → error handling, did_you_mean
+  Send: {"topic": "list"}               → list of available topic names
+
+  Unknown topics return the list of valid topics in the error.
+  GUIDE
+  tags: ["help", "discovery", "onboarding", "utility"],
+) do |data|
+  topic = data["topic"]?.try(&.as_s?)
+  text = if topic.nil?
+           Arcana::Help::BRIEFING
+         elsif topic == "list"
+           "Available topics: #{Arcana::Help.topics.join(", ")}"
+         elsif t = Arcana::Help.topic(topic)
+           t
+         else
+           raise "unknown topic '#{topic}' — available: #{Arcana::Help.topics.join(", ")}"
+         end
+  JSON::Any.new({"text" => JSON::Any.new(text)})
+end
+help_svc.start
+
 # Registry service — lists available providers.
 registry_schema = JSON.parse(%({"type":"object","properties":{"domain":{"type":"string","enum":["chat","image","tts","embed"],"description":"Which provider domain to list"}},"required":["domain"]}))
 
