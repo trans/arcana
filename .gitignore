@@ -6,6 +6,7 @@
 *.dwarf
 .env
 .claude/
+.mcp.json
 /pkg/src/
 /pkg/pkg/
 /pkg/*.tar.gz
