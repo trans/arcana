@@ -1,7 +1,7 @@
 version: 2.0
 shards:
   arcana-ai:
-    path: ../arcana-ai
+    git: https://github.com/trans/arcana-ai.git
     version: 0.1.0
 
   arcana-core:
@@ -18,7 +18,7 @@ shards:
 
   crimage:
     git: https://github.com/naqvis/crimage.git
-    version: 1.0.5+git.commit.2b3abbcdca426a2a13a39b986326f9a2f7f65bc6
+    version: 1.0.5+git.commit.7d3244a3850646e3d398cef071f7c3e3f52c7518
 
   db:
     git: https://github.com/crystal-lang/crystal-db.git
