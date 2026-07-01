@@ -7,6 +7,7 @@
 .env
 .claude/
 .mcp.json
+/claude-resume.md
 /pkg/src/
 /pkg/pkg/
 /pkg/*.tar.gz

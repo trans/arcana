@@ -66,3 +66,4 @@ deploy: build
     fi
     install -m 755 bin/arcana /home/arcana/bin/arcana
     @echo "Deployed. Restart with: sudo systemctl restart arcana"
+
