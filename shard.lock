@@ -1,5 +1,9 @@
 version: 2.0
 shards:
+  arcana-ai:
+    path: ../arcana-ai
+    version: 0.1.0
+
   arcana-core:
     git: https://github.com/trans/arcana-core.git
     version: 0.5.1

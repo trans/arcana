@@ -249,37 +249,6 @@ help_svc = Arcana::Service.new(
 end
 help_svc.start
 
-# Registry service — lists available providers.
-registry_schema = JSON.parse(%({"type":"object","properties":{"domain":{"type":"string","enum":["chat","image","tts","embed"],"description":"Which provider domain to list"}},"required":["domain"]}))
-
-registry_svc = Arcana::Service.new(
-  bus: bus, directory: dir,
-  address: "arcana:registry",
-  name: "Provider Registry",
-  description: "Lists available AI providers by domain (chat, image, tts, embed).",
-  schema: registry_schema,
-  guide: <<-GUIDE,
-  Query which providers are registered for a given domain.
-
-  Send: {"domain": "chat"}
-  Returns: {"providers": ["anthropic", "openai"]}
-
-  Valid domains: chat, image, tts, embed.
-  GUIDE
-  tags: ["providers", "discovery"],
-) do |data|
-  domain = data["domain"].as_s
-  providers = case domain
-              when "chat"  then Arcana::Registry.chat_providers
-              when "image" then Arcana::Registry.image_providers
-              when "tts"   then Arcana::Registry.tts_providers
-              when "embed" then Arcana::Registry.embed_providers
-              else              [] of String
-              end
-  JSON::Any.new({"providers" => JSON::Any.new(providers.map { |p| JSON::Any.new(p) })})
-end
-registry_svc.start
-
 # Markdown conversion service
 markdown_schema = JSON.parse(%({"type":"object","properties":{"text":{"type":"string","description":"Markdown text to convert"},"format":{"type":"string","enum":["html","ansi"],"description":"Output format: html (default) or ansi"}},"required":["text"]}))
 
@@ -318,7 +287,7 @@ markdown_svc.start
 # -- Provider-backed services (only registered when API keys are present) --
 
 if openai_key = ENV["OPENAI_API_KEY"]?
-  chat_openai = Arcana::Chat::OpenAI.new(api_key: openai_key)
+  chat_openai = Arcana::AI::Chat::OpenAI.new(api_key: openai_key)
   chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150)"}},"required":["messages"]}))
 
   chat_openai_svc = Arcana::Service.new(
@@ -344,12 +313,12 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     tags: ["chat", "llm", "openai"],
   ) do |data|
     msgs = data["messages"].as_a.map do |m|
-      Arcana::Chat::Message.new(
+      Arcana::AI::Chat::Message.new(
         role: m["role"].as_s,
         content: m["content"]?.try(&.as_s?),
       )
     end
-    request = Arcana::Chat::Request.new(
+    request = Arcana::AI::Chat::Request.new(
       messages: msgs,
       model: data["model"]?.try(&.as_s?) || "",
       temperature: data["temperature"]?.try(&.as_f?) || 0.7,
@@ -367,7 +336,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
   chat_openai_svc.start
 
   # Embed service
-  embed_openai = Arcana::Embed::OpenAI.new(api_key: openai_key)
+  embed_openai = Arcana::AI::Embed::OpenAI.new(api_key: openai_key)
   embed_schema = JSON.parse(%({"type":"object","properties":{"texts":{"type":"array","items":{"type":"string"},"description":"Texts to embed"},"model":{"type":"string","description":"Model (default: text-embedding-3-small)"}},"required":["texts"]}))
 
   embed_svc = Arcana::Service.new(
@@ -387,7 +356,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     tags: ["embed", "openai", "vectors"],
   ) do |data|
     texts = data["texts"].as_a.map(&.as_s)
-    request = Arcana::Embed::Request.new(
+    request = Arcana::AI::Embed::Request.new(
       texts: texts,
       model: data["model"]?.try(&.as_s?) || "",
     )
@@ -401,7 +370,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
   embed_svc.start
 
   # TTS service
-  tts_openai = Arcana::TTS::OpenAI.new(api_key: openai_key)
+  tts_openai = Arcana::AI::TTS::OpenAI.new(api_key: openai_key)
   tts_schema = JSON.parse(%({"type":"object","properties":{"text":{"type":"string","description":"Text to synthesize"},"voice":{"type":"string","description":"Voice: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse (default: alloy)"},"output_path":{"type":"string","description":"File path for output audio"},"format":{"type":"string","description":"Audio format: mp3, wav, aac, flac, opus, pcm (default: opus)"},"instructions":{"type":"string","description":"Style/persona instructions"},"speed":{"type":"number","description":"Speed 0.25-4.0 (default: 1.0)"}},"required":["text","output_path"]}))
 
   tts_svc = Arcana::Service.new(
@@ -426,7 +395,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     GUIDE
     tags: ["tts", "speech", "audio", "openai"],
   ) do |data|
-    request = Arcana::TTS::Request.new(
+    request = Arcana::AI::TTS::Request.new(
       text: data["text"].as_s,
       voice: data["voice"]?.try(&.as_s?) || "alloy",
       response_format: data["format"]?.try(&.as_s?) || "opus",
@@ -445,7 +414,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
 end
 
 if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
-  chat_anthropic = Arcana::Chat::Anthropic.new(api_key: anthropic_key)
+  chat_anthropic = Arcana::AI::Chat::Anthropic.new(api_key: anthropic_key)
   chat_anthropic_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: claude-sonnet-4-20250514)"},"temperature":{"type":"number","description":"Sampling temperature (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"web_search":{"type":"boolean","description":"If true, Claude can search the web during its response. Useful for fact lookup, finding URLs, or anything needing current information. The model decides when/whether to search. Default: false."}},"required":["messages"]}))
 
   chat_anthropic_svc = Arcana::Service.new(
@@ -478,16 +447,16 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
     tags: ["chat", "llm", "anthropic", "claude", "web"],
   ) do |data|
     msgs = data["messages"].as_a.map do |m|
-      Arcana::Chat::Message.new(
+      Arcana::AI::Chat::Message.new(
         role: m["role"].as_s,
         content: m["content"]?.try(&.as_s?),
       )
     end
     server_tools = nil
     if data["web_search"]?.try(&.as_bool?)
-      server_tools = [Arcana::Chat::ServerTool.web_search] of Arcana::Chat::ServerTool
+      server_tools = [Arcana::AI::Chat::ServerTool.web_search] of Arcana::AI::Chat::ServerTool
     end
-    request = Arcana::Chat::Request.new(
+    request = Arcana::AI::Chat::Request.new(
       messages: msgs,
       model: data["model"]?.try(&.as_s?) || "",
       temperature: data["temperature"]?.try(&.as_f?) || 0.7,
@@ -507,7 +476,7 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
 end
 
 if google_key = ENV["GOOGLE_API_KEY"]?
-  chat_gemini = Arcana::Chat::Gemini.new(api_key: google_key)
+  chat_gemini = Arcana::AI::Chat::Gemini.new(api_key: google_key)
   chat_gemini_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: gemini-2.5-flash)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"}},"required":["messages"]}))
 
   chat_gemini_svc = Arcana::Service.new(
@@ -535,12 +504,12 @@ if google_key = ENV["GOOGLE_API_KEY"]?
     tags: ["chat", "llm", "gemini", "google"],
   ) do |data|
     msgs = data["messages"].as_a.map do |m|
-      Arcana::Chat::Message.new(
+      Arcana::AI::Chat::Message.new(
         role: m["role"].as_s,
         content: m["content"]?.try(&.as_s?),
       )
     end
-    request = Arcana::Chat::Request.new(
+    request = Arcana::AI::Chat::Request.new(
       messages: msgs,
       model: data["model"]?.try(&.as_s?) || "",
       temperature: data["temperature"]?.try(&.as_f?) || 0.7,
@@ -559,7 +528,7 @@ if google_key = ENV["GOOGLE_API_KEY"]?
 end
 
 if runware_key = ENV["RUNWARE_API_KEY"]?
-  image_runware = Arcana::Image::Runware.new(api_key: runware_key)
+  image_runware = Arcana::AI::Image::Runware.new(api_key: runware_key)
   image_schema = JSON.parse(%({"type":"object","properties":{"prompt":{"type":"string","description":"Image description"},"output_path":{"type":"string","description":"File path for output image"},"width":{"type":"integer","description":"Width in pixels (default: 1024, auto-snapped to FLUX sizes)"},"height":{"type":"integer","description":"Height in pixels (default: 1024)"},"format":{"type":"string","description":"Output format: WEBP (default), PNG"},"enhance_prompt":{"type":"boolean","description":"Let provider rewrite prompt (default: false)"}},"required":["prompt","output_path"]}))
 
   image_svc = Arcana::Service.new(
@@ -587,7 +556,7 @@ if runware_key = ENV["RUNWARE_API_KEY"]?
     GUIDE
     tags: ["image", "runware", "flux", "generation"],
   ) do |data|
-    request = Arcana::Image::Request.new(
+    request = Arcana::AI::Image::Request.new(
       prompt: data["prompt"].as_s,
       width: data["width"]?.try(&.as_i?) || 1024,
       height: data["height"]?.try(&.as_i?) || 1024,
@@ -636,19 +605,19 @@ if agents_json = ENV["ARCANA_AGENTS"]?
     chat_provider = case provider_name
                     when "anthropic"
                       key = ENV["ANTHROPIC_API_KEY"]? || raise "ANTHROPIC_API_KEY required for agent #{address}"
-                      Arcana::Chat::Anthropic.new(api_key: key).as(Arcana::Chat::Provider)
+                      Arcana::AI::Chat::Anthropic.new(api_key: key).as(Arcana::AI::Chat::Provider)
                     when "gemini"
                       key = ENV["GOOGLE_API_KEY"]? || raise "GOOGLE_API_KEY required for agent #{address}"
-                      Arcana::Chat::Gemini.new(api_key: key).as(Arcana::Chat::Provider)
+                      Arcana::AI::Chat::Gemini.new(api_key: key).as(Arcana::AI::Chat::Provider)
                     when "grok"
                       key = ENV["XAI_API_KEY"]? || raise "XAI_API_KEY required for agent #{address}"
-                      Arcana::Chat::OpenAI.new(api_key: key, endpoint: "https://api.x.ai/v1/chat/completions", model: "grok-3").as(Arcana::Chat::Provider)
+                      Arcana::AI::Chat::OpenAI.new(api_key: key, endpoint: "https://api.x.ai/v1/chat/completions", model: "grok-3").as(Arcana::AI::Chat::Provider)
                     when "deepseek"
                       key = ENV["DEEPSEEK_API_KEY"]? || raise "DEEPSEEK_API_KEY required for agent #{address}"
-                      Arcana::Chat::OpenAI.new(api_key: key, endpoint: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat").as(Arcana::Chat::Provider)
+                      Arcana::AI::Chat::OpenAI.new(api_key: key, endpoint: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat").as(Arcana::AI::Chat::Provider)
                     else
                       key = ENV["OPENAI_API_KEY"]? || raise "OPENAI_API_KEY required for agent #{address}"
-                      Arcana::Chat::OpenAI.new(api_key: key).as(Arcana::Chat::Provider)
+                      Arcana::AI::Chat::OpenAI.new(api_key: key).as(Arcana::AI::Chat::Provider)
                     end
 
     agent = Arcana::ChatAgent.new(
@@ -666,19 +635,19 @@ elsif agent_address = ENV["ARCANA_AGENT_ADDRESS"]?
   chat_provider = case provider_name
                   when "anthropic"
                     key = ENV["ANTHROPIC_API_KEY"]? || raise "ANTHROPIC_API_KEY required for agent"
-                    Arcana::Chat::Anthropic.new(api_key: key).as(Arcana::Chat::Provider)
+                    Arcana::AI::Chat::Anthropic.new(api_key: key).as(Arcana::AI::Chat::Provider)
                   when "gemini"
                     key = ENV["GOOGLE_API_KEY"]? || raise "GOOGLE_API_KEY required for agent"
-                    Arcana::Chat::Gemini.new(api_key: key).as(Arcana::Chat::Provider)
+                    Arcana::AI::Chat::Gemini.new(api_key: key).as(Arcana::AI::Chat::Provider)
                   when "grok"
                     key = ENV["XAI_API_KEY"]? || raise "XAI_API_KEY required for agent"
-                    Arcana::Chat::OpenAI.new(api_key: key, endpoint: "https://api.x.ai/v1/chat/completions", model: "grok-3").as(Arcana::Chat::Provider)
+                    Arcana::AI::Chat::OpenAI.new(api_key: key, endpoint: "https://api.x.ai/v1/chat/completions", model: "grok-3").as(Arcana::AI::Chat::Provider)
                   when "deepseek"
                     key = ENV["DEEPSEEK_API_KEY"]? || raise "DEEPSEEK_API_KEY required for agent"
-                    Arcana::Chat::OpenAI.new(api_key: key, endpoint: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat").as(Arcana::Chat::Provider)
+                    Arcana::AI::Chat::OpenAI.new(api_key: key, endpoint: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat").as(Arcana::AI::Chat::Provider)
                   else
                     key = ENV["OPENAI_API_KEY"]? || raise "OPENAI_API_KEY required for agent"
-                    Arcana::Chat::OpenAI.new(api_key: key).as(Arcana::Chat::Provider)
+                    Arcana::AI::Chat::OpenAI.new(api_key: key).as(Arcana::AI::Chat::Provider)
                   end
 
   agent = Arcana::ChatAgent.new(

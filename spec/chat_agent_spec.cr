@@ -1,20 +1,20 @@
 require "./spec_helper"
 
 # Fake chat provider that echoes back the last user message.
-class FakeChatProvider < Arcana::Chat::Provider
+class FakeChatProvider < Arcana::AI::Chat::Provider
   getter call_count : Int32 = 0
 
   def name : String
     "fake"
   end
 
-  def complete(request : Arcana::Chat::Request) : Arcana::Chat::Response
+  def complete(request : Arcana::AI::Chat::Request) : Arcana::AI::Chat::Response
     @call_count += 1
     # Echo the last user message content.
     last_user = request.messages.reverse.find { |m| m.role == "user" }
     content = last_user.try(&.content) || "no message"
 
-    Arcana::Chat::Response.new(
+    Arcana::AI::Chat::Response.new(
       content: "Echo: #{content}",
       model: request.model,
       provider: "fake",

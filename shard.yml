@@ -1,5 +1,5 @@
 name: arcana
-version: 0.19.4
+version: 0.20.0
 
 authors:
   - Thomas Sawyer <transfire@gmail.com>
@@ -12,6 +12,8 @@ dependencies:
   arcana-core:
     github: trans/arcana-core
     version: ~> 0.5.1
+  arcana-ai:
+    path: ../arcana-ai
   pg:
     github: will/crystal-pg
     version: ~> 0.29.0

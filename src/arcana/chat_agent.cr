@@ -11,7 +11,7 @@ module Arcana
   #     address: "assistant",
   #     name: "Assistant",
   #     description: "General-purpose AI assistant",
-  #     provider: Arcana::Chat::OpenAI.new(api_key: ENV["OPENAI_API_KEY"]),
+  #     provider: Arcana::AI::Chat::OpenAI.new(api_key: ENV["OPENAI_API_KEY"]),
   #     system_prompt: "You are a helpful assistant.",
   #   )
   #   agent.start
@@ -30,7 +30,7 @@ module Arcana
       address : String,
       name : String,
       description : String,
-      @provider : Chat::Provider,
+      @provider : AI::Chat::Provider,
       @system_prompt : String = "You are a helpful assistant.",
       @model : String = "",
       @temperature : Float64 = 0.7,
@@ -40,7 +40,7 @@ module Arcana
       tags : Array(String) = [] of String,
     )
       super(bus, directory, address, name, description, schema, guide, tags)
-      @conversations = {} of String => Chat::History
+      @conversations = {} of String => AI::Chat::History
     end
 
     def init
@@ -59,7 +59,7 @@ module Arcana
 
       # Build the chat request.
       model = @model.empty? ? "gpt-4o-mini" : @model
-      request = Chat::Request.new(
+      request = AI::Chat::Request.new(
         messages: history.messages,
         model: model,
         temperature: @temperature,
@@ -97,9 +97,9 @@ module Arcana
       @conversations.clear
     end
 
-    private def conversation_for(address : String) : Chat::History
+    private def conversation_for(address : String) : AI::Chat::History
       @conversations[address] ||= begin
-        h = Chat::History.new
+        h = AI::Chat::History.new
         h.add_system(@system_prompt)
         h
       end

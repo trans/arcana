@@ -1,3 +1,20 @@
+arcana (0.20.0-1) unstable; urgency=medium
+
+  * BREAKING: AI provider code extracted into a new shard, arcana-ai.
+    All AI types moved from `Arcana::*` to `Arcana::AI::*`
+    (`Arcana::Chat::Anthropic` -> `Arcana::AI::Chat::Anthropic`, etc).
+    Consumers of the AI code as a Crystal library need to update
+    imports and namespace references. Bus-service semantics are
+    unchanged — `openai:chat`, `anthropic:chat`, etc. still work the
+    same over the wire.
+  * The `arcana:registry` bus service is removed. `arcana_directory`
+    (or POST /directory) plus per-service `_intent: "help"` cover
+    what it was used for. `Arcana::AI::Registry` remains as the
+    programmatic factory in arcana-ai.
+  * arcana now depends on arcana-ai ~> 0.1.0.
+
+ -- trans <transfire@gmail.com>  Wed, 01 Jul 2026 00:00:00 +0000
+
 arcana (0.19.4-1) unstable; urgency=medium
 
   * New built-in service `arcana:help` — like 411 for the bus. Send an

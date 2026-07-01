@@ -36,11 +36,6 @@ module Arcana
         the bus. Each listing includes a `guide` field with usage. To get
         help from any *service*, send `_intent: "help"` in the payload —
         the service replies with its guide and schema.
-
-        **Heads up:** `arcana:registry` is the *AI provider* registry — it
-        returns providers per domain (chat/image/tts/embed). For bus-level
-        discovery (who's on the bus?), use the `arcana_directory` tool, not
-        this service.
         MD
 
       "errors" => <<-MD,
