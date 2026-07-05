@@ -1,3 +1,15 @@
+arcana (0.20.1-1) unstable; urgency=medium
+
+  * Bump arcana-core to 0.5.2 for the Service poison-pill fix. Prior
+    to this, a service that received a payload failing schema
+    validation *because it wasn't a Hash* crashed its consumer fiber
+    and stopped consuming its mailbox — every subsequent delivery
+    piled up unprocessed. This bit the anthropic:chat and openai:chat
+    workers in a live deployment. Now the caller gets a proper
+    Protocol.need response and the loop keeps consuming.
+
+ -- trans <transfire@gmail.com>  Sun, 05 Jul 2026 00:00:00 +0000
+
 arcana (0.20.0-1) unstable; urgency=medium
 
   * BREAKING: AI provider code extracted into a new shard, arcana-ai.
