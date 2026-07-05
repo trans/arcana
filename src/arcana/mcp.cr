@@ -45,7 +45,7 @@ module Arcana
             from:       {type: "string", description: "Your address on the bus (so replies come back to you)"},
             to:         {type: "string", description: "Target address on the bus"},
             subject:    {type: "string", description: "Message subject/intent"},
-            payload:    {description: "Message payload (any JSON value)"},
+            payload:    {description: "Message payload — pass a JSON OBJECT with the fields the target service expects (e.g. {\"text\":\"hi\",\"output_path\":\"/tmp/x.opus\"} for openai:tts). Not a stringified JSON blob — pass the object directly. The server does auto-unwrap stringified JSON as a fallback, but the tool schema wants an object."},
             ordering:   {type: "string", enum: ["auto", "sync", "async"], description: "Message ordering: auto (default, resolved by target kind), sync (block for reply), or async (fire and forget)"},
             timeout_ms: {type: "integer", description: "Timeout in milliseconds for sync ordering (default: 30000)"},
           },

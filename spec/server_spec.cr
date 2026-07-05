@@ -325,6 +325,78 @@ describe Arcana::Server do
       end
     end
 
+    it "unwraps a stringified JSON payload so validated services see fields at the top level" do
+      # Regression for cattacula's bug report: MCP clients that send
+      # `payload: "{\"text\":\"hi\"}"` (JSON as a string) used to make
+      # openai:tts / anthropic:chat reply "missing required fields"
+      # because the schema check looked for "text" at the top level of
+      # a string, not inside it. The server now normalizes stringified
+      # JSON objects/arrays back to real structures at the boundary.
+      bus = Arcana::Bus.new
+      dir = Arcana::Directory.new
+
+      schema = JSON.parse(%({"type":"object","required":["text"]}))
+      captured = ""
+      svc = Arcana::Service.new(
+        bus: bus, directory: dir,
+        address: "test:validated",
+        name: "Validated",
+        description: "Requires text",
+        schema: schema,
+      ) do |data|
+        captured = data["text"].as_s
+        JSON::Any.new({"echoed" => JSON::Any.new(captured)})
+      end
+      svc.start
+      bus.mailbox("client")
+
+      server = Arcana::Server.new(bus, dir, port: 14503)
+      server.start_in_background
+      begin
+        headers = HTTP::Headers{"Content-Type" => "application/json"}
+        # Payload comes in as a *string* — the way a naive MCP client encodes it.
+        body = {from: "client", to: "test:validated", payload: %({"text":"hi"})}.to_json
+        resp = HTTP::Client.post("http://127.0.0.1:14503/deliver", headers: headers, body: body)
+        resp.status_code.should eq(200)
+        parsed = JSON.parse(resp.body)
+        payload = parsed["payload"]
+        payload["_status"].as_s.should eq("result")
+        payload["data"]["echoed"].as_s.should eq("hi")
+        captured.should eq("hi")
+      ensure
+        server.stop
+      end
+    end
+
+    it "leaves a legitimately-string payload alone" do
+      bus = Arcana::Bus.new
+      dir = Arcana::Directory.new
+      seen = ""
+      svc = Arcana::Service.new(
+        bus: bus, directory: dir,
+        address: "test:echo-str",
+        name: "Echo",
+        description: "echoes",
+      ) do |data|
+        seen = data.as_s
+        data
+      end
+      svc.start
+      bus.mailbox("client")
+
+      server = Arcana::Server.new(bus, dir, port: 14504)
+      server.start_in_background
+      begin
+        headers = HTTP::Headers{"Content-Type" => "application/json"}
+        body = {from: "client", to: "test:echo-str", payload: "hello world"}.to_json
+        resp = HTTP::Client.post("http://127.0.0.1:14504/deliver", headers: headers, body: body)
+        resp.status_code.should eq(200)
+        seen.should eq("hello world")
+      ensure
+        server.stop
+      end
+    end
+
     it "returns no suggestion when nothing is close enough" do
       bus = Arcana::Bus.new
       dir = Arcana::Directory.new

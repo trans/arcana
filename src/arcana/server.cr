@@ -662,11 +662,37 @@ module Arcana
         from: env["from"]?.try(&.as_s?) || "",
         to: env["to"]?.try(&.as_s?) || "",
         subject: env["subject"]?.try(&.as_s?) || "",
-        payload: env["payload"]? || JSON::Any.new(nil),
+        payload: normalize_payload(env["payload"]?),
         correlation_id: env["correlation_id"]?.try(&.as_s?) || Random::Secure.hex(8),
         reply_to: env["reply_to"]?.try(&.as_s?),
         ordering: ordering,
       )
+    end
+
+    # Some MCP clients (and hand-rolled HTTP callers) stringify the payload
+    # instead of nesting it as JSON — the tool schema advertised the field as
+    # "any JSON value" with no type, so a client can rationally send
+    # `payload: "{\"text\":\"hi\"}"`. Left alone, schema-validated services
+    # (openai:tts, anthropic:chat, ...) look for their fields at the top
+    # level of the payload, don't find them, and reply "missing required
+    # fields." Auto-unwrap looks-like-JSON strings back to real objects.
+    # A literal string payload like `"hello"` stays a string.
+    private def normalize_payload(raw : JSON::Any?) : JSON::Any
+      return JSON::Any.new(nil) if raw.nil?
+      if s = raw.as_s?
+        stripped = s.lstrip
+        if stripped.starts_with?('{') || stripped.starts_with?('[')
+          begin
+            parsed = JSON.parse(s)
+            return parsed if parsed.as_h? || parsed.as_a?
+          rescue JSON::ParseException
+            # Fall through — payload was a string that looks like JSON but
+            # isn't valid; keep it as a string so the caller sees their
+            # original data.
+          end
+        end
+      end
+      raw
     end
 
     # WebSocket handler for /bus path.

@@ -1,3 +1,18 @@
+arcana (0.20.2-1) unstable; urgency=medium
+
+  * Auto-unwrap stringified-JSON payloads at the server boundary.
+    Some MCP clients (and hand-rolled HTTP callers) encode the payload
+    as `"{\"text\":\"hi\"}"` instead of nesting it as an object. Left
+    alone, schema-validated services (openai:tts, anthropic:chat, ...)
+    couldn't find their fields at the top level and replied "missing
+    required fields." envelope_from_json now detects looks-like-JSON
+    strings and parses them back to real structures before delivery;
+    a literal string payload like "hello" is left alone.
+  * arcana_deliver MCP tool description tightened to say "pass a JSON
+    OBJECT" so future callers don't fall into the same pit.
+
+ -- trans <transfire@gmail.com>  Sun, 05 Jul 2026 12:00:00 +0000
+
 arcana (0.20.1-1) unstable; urgency=medium
 
   * Bump arcana-core to 0.5.2 for the Service poison-pill fix. Prior
