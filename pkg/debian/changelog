@@ -1,3 +1,17 @@
+arcana (0.20.3-1) unstable; urgency=medium
+
+  * openai:tts service gains an `inline: true` option. When set, the
+    audio is returned as a base64 string in the response
+    (`audio_base64`) instead of being written to `output_path`. The
+    caller decides whether the file lives on disk or comes back on the
+    wire. Either `output_path` or `inline: true` must be provided;
+    missing both is a validation error.
+  * `output_path` is now optional in the schema (was required); the
+    handler enforces the "one of" invariant since JSON Schema
+    conditional-required isn't wired in arcana-core's checker.
+
+ -- trans <transfire@gmail.com>  Sat, 11 Jul 2026 00:00:00 +0000
+
 arcana (0.20.2-1) unstable; urgency=medium
 
   * Auto-unwrap stringified-JSON payloads at the server boundary.

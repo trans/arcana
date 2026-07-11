@@ -371,7 +371,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
 
   # TTS service
   tts_openai = Arcana::AI::TTS::OpenAI.new(api_key: openai_key)
-  tts_schema = JSON.parse(%({"type":"object","properties":{"text":{"type":"string","description":"Text to synthesize"},"voice":{"type":"string","description":"Voice: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse (default: alloy)"},"output_path":{"type":"string","description":"File path for output audio"},"format":{"type":"string","description":"Audio format: mp3, wav, aac, flac, opus, pcm (default: opus)"},"instructions":{"type":"string","description":"Style/persona instructions"},"speed":{"type":"number","description":"Speed 0.25-4.0 (default: 1.0)"}},"required":["text","output_path"]}))
+  tts_schema = JSON.parse(%({"type":"object","properties":{"text":{"type":"string","description":"Text to synthesize"},"voice":{"type":"string","description":"Voice: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse (default: alloy)"},"output_path":{"type":"string","description":"File path for output audio (required unless inline: true)"},"inline":{"type":"boolean","description":"If true, return audio as base64 in the response instead of writing to disk. Default false."},"format":{"type":"string","description":"Audio format: mp3, wav, aac, flac, opus, pcm (default: opus)"},"instructions":{"type":"string","description":"Style/persona instructions"},"speed":{"type":"number","description":"Speed 0.25-4.0 (default: 1.0)"}},"required":["text"]}))
 
   tts_svc = Arcana::Service.new(
     bus: bus, directory: dir,
@@ -380,9 +380,10 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     description: "Synthesize speech from text via OpenAI.",
     schema: tts_schema,
     guide: <<-GUIDE,
-    Send text and an output path to generate speech audio.
+    Send text and either an output path or inline: true to generate speech audio.
 
-    Example: {"text": "Hello world", "output_path": "/tmp/hello.opus"}
+    File example:   {"text": "Hello world", "output_path": "/tmp/hello.opus"}
+    Inline example: {"text": "Hello world", "inline": true}
 
     Optional fields:
       voice: alloy (default), nova, echo, etc.
@@ -390,11 +391,20 @@ if openai_key = ENV["OPENAI_API_KEY"]?
       instructions: "Speak warmly and clearly"
       speed: 0.25-4.0
 
-    Returns: {"output_path": "/tmp/hello.opus", "model": "...",
-              "content_type": "audio/opus", "content_length": N}
+    Returns (file mode):
+      {"output_path": "/tmp/hello.opus", "model": "...",
+       "content_type": "audio/opus", "content_length": N}
+
+    Returns (inline mode):
+      {"audio_base64": "...", "model": "...",
+       "content_type": "audio/opus", "content_length": N}
     GUIDE
     tags: ["tts", "speech", "audio", "openai"],
   ) do |data|
+    inline = data["inline"]?.try(&.as_bool?) || false
+    output_path = data["output_path"]?.try(&.as_s?)
+    raise "Provide either output_path or inline: true" if !inline && output_path.nil?
+
     request = Arcana::AI::TTS::Request.new(
       text: data["text"].as_s,
       voice: data["voice"]?.try(&.as_s?) || "alloy",
@@ -402,13 +412,34 @@ if openai_key = ENV["OPENAI_API_KEY"]?
       instructions: data["instructions"]?.try(&.as_s?),
       speed: data["speed"]?.try(&.as_f?),
     )
-    result = tts_openai.synthesize(request, data["output_path"].as_s)
-    JSON::Any.new({
-      "output_path"    => JSON::Any.new(result.output_path),
-      "model"          => JSON::Any.new(result.model),
-      "content_type"   => JSON::Any.new(result.content_type),
-      "content_length" => JSON::Any.new(result.content_length),
-    })
+
+    if inline
+      # Synthesize to a temp file, base64-encode, delete. The underlying
+      # provider always writes to disk; keeping this at the bus-service
+      # layer avoids an arcana-ai API change. If inline becomes the
+      # common case, promote to a proper synthesize_bytes in arcana-ai.
+      temp = File.tempname("arcana-tts-", ".#{request.response_format}")
+      begin
+        result = tts_openai.synthesize(request, temp)
+        audio = Base64.strict_encode(File.read(temp))
+        JSON::Any.new({
+          "audio_base64"   => JSON::Any.new(audio),
+          "model"          => JSON::Any.new(result.model),
+          "content_type"   => JSON::Any.new(result.content_type),
+          "content_length" => JSON::Any.new(result.content_length),
+        })
+      ensure
+        File.delete(temp) if File.exists?(temp)
+      end
+    else
+      result = tts_openai.synthesize(request, output_path.not_nil!)
+      JSON::Any.new({
+        "output_path"    => JSON::Any.new(result.output_path),
+        "model"          => JSON::Any.new(result.model),
+        "content_type"   => JSON::Any.new(result.content_type),
+        "content_length" => JSON::Any.new(result.content_length),
+      })
+    end
   end
   tts_svc.start
 end
