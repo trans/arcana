@@ -414,10 +414,11 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     )
 
     if inline
-      # Synthesize to a temp file, base64-encode, delete. The underlying
-      # provider always writes to disk; keeping this at the bus-service
-      # layer avoids an arcana-ai API change. If inline becomes the
-      # common case, promote to a proper synthesize_bytes in arcana-ai.
+      # TODO: promote to arcana-ai. Synthesize-to-temp-file then read+encode
+      # is a stopgap while Arcana::AI::TTS::Provider only exposes
+      # synthesize(request, output_path). Add synthesize_bytes(request) : Bytes
+      # to arcana-ai (0.2.x-ish) and replace this block with a direct
+      # base64 encode of the returned bytes — kills the disk round-trip.
       temp = File.tempname("arcana-tts-", ".#{request.response_format}")
       begin
         result = tts_openai.synthesize(request, temp)
