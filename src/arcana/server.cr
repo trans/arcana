@@ -782,10 +782,19 @@ module Arcana
               # Register in directory unless already present (allows reconnection
               # after restart when state was loaded from disk).
               if listed && !@directory.lookup(raw)
+                kind_str = parsed.str?("kind")
+                kind = case kind_str
+                       when "service" then Directory::Kind::Service
+                       when "agent"   then Directory::Kind::Agent
+                       end
                 @directory.register(Directory::Listing.new(
                   address: raw,
                   name: parsed.str?("name") || raw,
                   description: parsed.str("description"),
+                  kind: kind,
+                  capability: parsed.str?("capability"),
+                  guide: parsed.str?("guide"),
+                  schema: parsed["schema"]?,
                   tags: parsed.str_arr("tags"),
                 ))
               end

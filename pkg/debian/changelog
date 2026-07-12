@@ -1,3 +1,18 @@
+arcana (0.22.1-1) unstable; urgency=medium
+
+  * WebSocketHandler's `join` frame parser reads `kind`, `capability`,
+    `guide`, and `schema` fields when present. Remote providers can
+    now declare their identity fully in one shot — an
+    `Arcana::Client` (from arcana-core 0.9.0) constructed with those
+    params lands with a properly-populated Directory listing.
+  * Enables the `Arcana::Toolset.new(client: my_client)` shape from
+    arcana-core 0.9.0 — separate apps like mj can expose multi-tool
+    providers over WebSocket with the same declarative API used
+    in-process.
+  * Depends on arcana-core ~> 0.9.0.
+
+ -- trans <transfire@gmail.com>  Sun, 12 Jul 2026 21:00:00 +0000
+
 arcana (0.22.0-1) unstable; urgency=medium
 
   * BREAKING: `_intent: "help"` retired in favor of `{"tool": "help"}`.
