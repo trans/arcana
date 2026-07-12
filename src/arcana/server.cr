@@ -157,6 +157,8 @@ module Arcana
           ctx.response.print @directory.to_json(@directory.search(query))
         elsif tag = ctx.request.query_params["tag"]?
           ctx.response.print @directory.to_json(@directory.by_tag(tag))
+        elsif capability = ctx.request.query_params["capability"]?
+          ctx.response.print @directory.to_json(@directory.by_capability(capability))
         elsif kind = ctx.request.query_params["kind"]?
           k = kind == "agent" ? Directory::Kind::Agent : Directory::Kind::Service
           ctx.response.print @directory.to_json(@directory.by_kind(k))
@@ -251,10 +253,17 @@ module Arcana
       listed = parsed["listed"]?.try(&.as_bool?)
       listed = true if listed.nil?
       if listed
+        kind_str = parsed["kind"]?.try(&.as_s?)
+        kind = case kind_str
+               when "service" then Directory::Kind::Service
+               when "agent"   then Directory::Kind::Agent
+               end
         @directory.register(Directory::Listing.new(
           address: address,
           name: parsed["name"]?.try(&.as_s?) || address,
           description: parsed["description"]?.try(&.as_s?) || "",
+          kind: kind,
+          capability: parsed["capability"]?.try(&.as_s?),
           schema: parsed["schema"]?,
           guide: parsed["guide"]?.try(&.as_s?),
           tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,

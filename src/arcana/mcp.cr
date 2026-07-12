@@ -29,10 +29,11 @@ module Arcana
         inputSchema: {
           type:       "object",
           properties: {
-            query:   {type: "string", description: "Search query (matches name, description, tags)"},
-            tag:     {type: "string", description: "Filter by tag"},
-            kind:    {type: "string", enum: ["agent", "service"], description: "Filter by kind"},
-            address: {type: "string", description: "Look up a specific address"},
+            query:      {type: "string", description: "Search query (matches name, description, tags)"},
+            tag:        {type: "string", description: "Filter by tag"},
+            kind:       {type: "string", enum: ["agent", "service"], description: "Filter by kind"},
+            capability: {type: "string", description: "Filter by capability (e.g. 'chat', 'image', 'tts', 'embed', 'markdown')"},
+            address:    {type: "string", description: "Look up a specific address"},
           },
         },
       },
@@ -71,11 +72,13 @@ module Arcana
         inputSchema: {
           type:       "object",
           properties: {
-            address:     {type: "string", description: "Your address on the bus. Agents are plain names (e.g. 'alice'); services are 'owner:capability' (e.g. 'arcana:echo')."},
+            address:     {type: "string", description: "Your routing address on the bus. Any single token (`[a-z][a-z0-9-]*`) or two-token colon form (`owner:capability`) — the colon is a naming convention, not a type marker. Pick something stable; other agents will remember it."},
             action:      {type: "string", enum: ["register", "unregister", "busy", "idle"], description: "Action to perform (default: register)"},
             token:       {type: "string", description: "Secret token to protect your mailbox (optional, you choose it)"},
             name:        {type: "string", description: "Display name for the directory"},
             description: {type: "string", description: "What you do (for the directory)"},
+            kind:        {type: "string", enum: ["agent", "service"], description: "What kind of listing this is. Default: agent. Set to 'service' if you handle requests via a fixed schema."},
+            capability:  {type: "string", description: "For services: the capability you provide (e.g. 'chat', 'image', 'tts', 'embed'). Ignored for agents."},
             guide:       {type: "string", description: "How-to guide for interacting with you"},
             tags:        {type: "array", items: {type: "string"}, description: "Tags for discovery"},
             listed:      {type: "boolean", description: "Whether to add a directory listing. Default true. Set false for pure consumers that send/subscribe but don't accept addressed messages — they get a mailbox but stay invisible to discovery."},
@@ -281,6 +284,8 @@ module Arcana
         http_get("/directory?q=#{URI.encode_path_segment(query)}")
       elsif tag = args["tag"]?.try(&.as_s?)
         http_get("/directory?tag=#{URI.encode_path_segment(tag)}")
+      elsif capability = args["capability"]?.try(&.as_s?)
+        http_get("/directory?capability=#{URI.encode_path_segment(capability)}")
       elsif kind = args["kind"]?.try(&.as_s?)
         http_get("/directory?kind=#{kind}")
       else
@@ -341,6 +346,8 @@ module Arcana
           token:       args["token"]?.try(&.as_s?),
           name:        args["name"]?.try(&.as_s?),
           description: args["description"]?.try(&.as_s?),
+          kind:        args["kind"]?.try(&.as_s?),
+          capability:  args["capability"]?.try(&.as_s?),
           guide:       args["guide"]?.try(&.as_s?),
           tags:        args["tags"]?,
           listed:      args["listed"]?.try(&.as_bool?),

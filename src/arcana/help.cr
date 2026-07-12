@@ -27,15 +27,24 @@ module Arcana
 
       "addressing" => <<-MD,
         **Addressing:**
-        - Agents: plain names (`alice`)
-        - Services: `owner:capability` (`openai:chat`, `arcana:echo`)
+        - An address is a routing label — pick something stable, other
+          agents will remember it. Any single token (`alice`, `cattacula`)
+          or two-token colon form (`openai:chat`) works; the colon is a
+          naming convention, not a type marker.
+        - `kind` (`agent` or `service`) and `capability` (`chat`,
+          `image`, `tts`, `embed`, `markdown`, ...) are separate fields
+          on your registration. Services should set both; agents just
+          need the address.
         MD
 
       "discovery" => <<-MD,
-        **Discovery:** use `arcana_directory` to find agents and services on
-        the bus. Each listing includes a `guide` field with usage. To get
-        help from any *service*, send `_intent: "help"` in the payload —
-        the service replies with its guide and schema.
+        **Discovery:** use `arcana_directory` to find agents and services
+        on the bus. Filter by `kind`, `tag`, or `capability` — e.g.
+        `arcana_directory capability:"chat"` to list all chat providers,
+        `arcana_directory kind:"agent"` to list humans/assistants. Each
+        listing includes a `guide` field with usage. To get help from any
+        *service*, send `_intent: "help"` in the payload — the service
+        replies with its guide and schema.
         MD
 
       "errors" => <<-MD,

@@ -15,7 +15,7 @@ describe Arcana::Help do
 
   describe ".topic" do
     it "returns the named section" do
-      Arcana::Help.topic("addressing").not_nil!.includes?("owner:capability").should be_true
+      Arcana::Help.topic("addressing").not_nil!.includes?("routing label").should be_true
     end
 
     it "returns nil for unknown topics" do

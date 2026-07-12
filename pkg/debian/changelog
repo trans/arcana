@@ -1,3 +1,26 @@
+arcana (0.21.0-1) unstable; urgency=medium
+
+  * Identity/capability split. An address is now a routing label, not
+    a type marker. Kind (agent/service) and capability (chat/image/tts
+    /markdown/...) are separate fields on the listing.
+    - POST /register accepts optional `kind` and `capability`.
+    - MCP arcana_register gains `kind` and `capability` params.
+    - MCP arcana_directory gains a `capability` filter
+      (`arcana_directory capability:"chat"` lists all chat services).
+    - Built-in services (openai:chat, anthropic:chat, gemini:chat,
+      runware:image, openai:tts, openai:embed, arcana:echo,
+      arcana:markdown, arcana:help) declare their capability
+      explicitly.
+    - Help briefing rewritten: addressing is described as free-form
+      labels, kind and capability as separate fields.
+  * Depends on arcana-core ~> 0.6.0.
+  * No wire-format break for existing callers — legacy registrations
+    without kind/capability still work via the address-based fallback
+    in the Listing constructor (colon = service; capability = right
+    half of colon-form).
+
+ -- trans <transfire@gmail.com>  Sun, 12 Jul 2026 00:00:00 +0000
+
 arcana (0.20.4-1) unstable; urgency=medium
 
   * Bump default prune TTLs. ARCANA_AGENT_TTL default 24h -> 7d;
