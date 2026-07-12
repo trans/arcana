@@ -1,3 +1,14 @@
+arcana (0.21.1-1) unstable; urgency=medium
+
+  * Sweep the codebase for the `payload["field"]?.try(&.as_s?) || def`
+    idiom now that arcana-core 0.7.0 ships the ergonomic getters.
+    ~150 sites in server.cr, mcp.cr, bin/arcana.cr, snapshot.cr, and
+    chat_agent.cr collapse to `payload.str?("field", def)` and
+    friends. Behavior identical; code much more readable.
+  * Depends on arcana-core ~> 0.7.0.
+
+ -- trans <transfire@gmail.com>  Sun, 12 Jul 2026 12:00:00 +0000
+
 arcana (0.21.0-1) unstable; urgency=medium
 
   * Identity/capability split. An address is now a routing label, not

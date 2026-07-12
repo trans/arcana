@@ -108,7 +108,7 @@ module Arcana
     private def format_incoming(envelope : Envelope) : String
       payload = envelope.payload
       # If payload has a "message" string field, use that directly.
-      if msg = payload["message"]?.try(&.as_s?)
+      if msg = payload.str?("message")
         prefix = envelope.subject.empty? ? "" : "[#{envelope.subject}] "
         "#{prefix}#{msg}"
       else

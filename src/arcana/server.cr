@@ -90,7 +90,7 @@ module Arcana
     private def check_token!(address : String, parsed : JSON::Any)
       expected = @tokens[address]?
       return unless expected  # no token set = no auth required
-      given = parsed["token"]?.try(&.as_s?) || ""
+      given = parsed.str?("token", "")
       unless given == expected
         @events.try &.record(Events::Event.new(
           type: "auth.failed",
@@ -236,12 +236,12 @@ module Arcana
 
     private def handle_post_register(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed["address"]?.try(&.as_s?) || ""
+      address = parsed.str?("address", "")
       raise "address required" if address.empty?
       Directory.validate_address(address)
 
       # Store token if provided (agent-chosen shared secret)
-      if token = parsed["token"]?.try(&.as_s?)
+      if token = parsed.str?("token")
         @tokens[address] = token unless token.empty?
       end
 
@@ -250,23 +250,23 @@ module Arcana
 
       # Register in directory unless caller opted out (e.g. pure consumers
       # that send/subscribe but never accept addressed messages).
-      listed = parsed["listed"]?.try(&.as_bool?)
+      listed = parsed.bool?("listed")
       listed = true if listed.nil?
       if listed
-        kind_str = parsed["kind"]?.try(&.as_s?)
+        kind_str = parsed.str?("kind")
         kind = case kind_str
                when "service" then Directory::Kind::Service
                when "agent"   then Directory::Kind::Agent
                end
         @directory.register(Directory::Listing.new(
           address: address,
-          name: parsed["name"]?.try(&.as_s?) || address,
-          description: parsed["description"]?.try(&.as_s?) || "",
+          name: parsed.str?("name") || address,
+          description: parsed.str?("description", ""),
           kind: kind,
-          capability: parsed["capability"]?.try(&.as_s?),
+          capability: parsed.str?("capability"),
           schema: parsed["schema"]?,
-          guide: parsed["guide"]?.try(&.as_s?),
-          tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
+          guide: parsed.str?("guide"),
+          tags: parsed.str_arr?("tags", [] of String),
         ))
       end
       save_state
@@ -279,7 +279,7 @@ module Arcana
 
     private def handle_post_unregister(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed["address"]?.try(&.as_s?) || ""
+      address = parsed.str?("address", "")
       raise "address required" if address.empty?
 
       check_token!(address, parsed)
@@ -297,7 +297,7 @@ module Arcana
 
     private def handle_post_inbox(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed["address"]?.try(&.as_s?) || ""
+      address = parsed.str?("address", "")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
@@ -311,7 +311,7 @@ module Arcana
 
     private def handle_post_receive(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed["address"]?.try(&.as_s?) || ""
+      address = parsed.str?("address", "")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
@@ -319,8 +319,8 @@ module Arcana
       mb = @bus.mailbox(resolved)
 
       # Selective receive by id (with optional timeout)
-      if id = parsed["id"]?.try(&.as_s?)
-        timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 0
+      if id = parsed.str?("id")
+        timeout_ms = parsed.int?("timeout_ms", 0)
         msg = if timeout_ms > 0
                 mb.receive(id, timeout_ms.milliseconds)
               else
@@ -334,7 +334,7 @@ module Arcana
         return
       end
 
-      timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 0
+      timeout_ms = parsed.int?("timeout_ms", 0)
       messages = [] of Envelope
 
       if timeout_ms > 0 && messages.empty?
@@ -381,7 +381,7 @@ module Arcana
         envelope = envelope_from_json(parsed)
         failed_addr = envelope.to
         check_sender!(envelope.from)
-        timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
+        timeout_ms = parsed.int?("timeout_ms", 30_000)
         timeout = timeout_ms.milliseconds
 
         # Use strict deliver (raises if no mailbox). Silent drops are worse
@@ -487,7 +487,7 @@ module Arcana
     private def handle_post_request(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
       envelope = envelope_from_json(parsed)
-      timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
+      timeout_ms = parsed.int?("timeout_ms", 30_000)
       timeout = timeout_ms.milliseconds
 
       result = @bus.request(envelope, timeout: timeout)
@@ -504,7 +504,7 @@ module Arcana
 
     private def handle_post_outstanding(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed["address"]?.try(&.as_s?) || ""
+      address = parsed.str?("address", "")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
@@ -518,12 +518,12 @@ module Arcana
 
     private def handle_post_await(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed["address"]?.try(&.as_s?) || ""
+      address = parsed.str?("address", "")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
 
-      timeout_ms = parsed["timeout_ms"]?.try(&.as_i?) || 30_000
+      timeout_ms = parsed.int?("timeout_ms", 30_000)
       mb = @bus.mailbox(resolved)
       all_met = mb.await_outstanding(timeout_ms.milliseconds)
       ctx.response.print %({"address":"#{resolved}","all_met":#{all_met}})
@@ -534,14 +534,14 @@ module Arcana
 
     private def handle_post_freeze(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed["address"]?.try(&.as_s?) || ""
+      address = parsed.str?("address", "")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
 
-      id = parsed["id"]?.try(&.as_s?) || ""
+      id = parsed.str?("id", "")
       raise "id required" if id.empty?
-      by = parsed["by"]?.try(&.as_s?) || ""
+      by = parsed.str?("by", "")
 
       mb = @bus.mailbox(resolved)
       if mb.freeze(id, by)
@@ -557,17 +557,17 @@ module Arcana
 
     private def handle_post_thaw(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed["address"]?.try(&.as_s?) || ""
+      address = parsed.str?("address", "")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
 
-      if parsed["all"]?.try(&.as_bool?)
+      if parsed.bool?("all")
         mb = @bus.mailbox(resolved)
         count = mb.thaw_all
         ctx.response.print %({"ok":true,"thawed":#{count}})
       else
-        id = parsed["id"]?.try(&.as_s?) || ""
+        id = parsed.str?("id", "")
         raise "id required" if id.empty?
         mb = @bus.mailbox(resolved)
         if mb.thaw(id)
@@ -584,7 +584,7 @@ module Arcana
 
     private def handle_post_frozen(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed["address"]?.try(&.as_s?) || ""
+      address = parsed.str?("address", "")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
@@ -598,12 +598,12 @@ module Arcana
 
     private def handle_post_busy(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed["address"]?.try(&.as_s?) || ""
+      address = parsed.str?("address", "")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
 
-      busy = parsed["busy"]?.try(&.as_bool?) || false
+      busy = parsed.bool?("busy", false)
       @directory.set_busy(resolved, busy)
       ctx.response.print %({"ok":true,"address":"#{resolved}","busy":#{busy}})
     rescue ex
@@ -613,7 +613,7 @@ module Arcana
 
     private def handle_post_peek(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed["address"]?.try(&.as_s?) || ""
+      address = parsed.str?("address", "")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
@@ -627,7 +627,7 @@ module Arcana
 
     private def handle_post_publish(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      topic = parsed["topic"]?.try(&.as_s?) || ""
+      topic = parsed.str?("topic", "")
       envelope = envelope_from_json(parsed)
       check_sender!(envelope.from)
       @bus.publish(topic, envelope)
@@ -662,18 +662,18 @@ module Arcana
 
     private def envelope_from_json(parsed : JSON::Any) : Envelope
       env = parsed["envelope"]? || parsed
-      ordering = case env["ordering"]?.try(&.as_s?)
+      ordering = case env.str?("ordering")
                  when "sync"  then Ordering::Sync
                  when "async" then Ordering::Async
                  else              Ordering::Auto
                  end
       Envelope.new(
-        from: env["from"]?.try(&.as_s?) || "",
-        to: env["to"]?.try(&.as_s?) || "",
-        subject: env["subject"]?.try(&.as_s?) || "",
+        from: env.str?("from", ""),
+        to: env.str?("to", ""),
+        subject: env.str?("subject", ""),
         payload: normalize_payload(env["payload"]?),
-        correlation_id: env["correlation_id"]?.try(&.as_s?) || Random::Secure.hex(8),
-        reply_to: env["reply_to"]?.try(&.as_s?),
+        correlation_id: env.str?("correlation_id") || Random::Secure.hex(8),
+        reply_to: env.str?("reply_to"),
         ordering: ordering,
       )
     end
@@ -766,17 +766,17 @@ module Arcana
         ws.on_message do |msg|
           begin
             parsed = JSON.parse(msg)
-            type = parsed["type"]?.try(&.as_s?) || ""
+            type = parsed.str?("type", "")
 
             case type
             when "join"
-              raw_addr = parsed["address"]?.try(&.as_s?)
+              raw_addr = parsed.str?("address")
               next unless raw = raw_addr
               Directory.validate_address(raw)
 
               # Caller can opt out of directory listing (pure consumers that
               # send/subscribe but never accept addressed messages).
-              listed = parsed["listed"]?.try(&.as_bool?)
+              listed = parsed.bool?("listed")
               listed = true if listed.nil?
 
               # Register in directory unless already present (allows reconnection
@@ -784,9 +784,9 @@ module Arcana
               if listed && !@directory.lookup(raw)
                 @directory.register(Directory::Listing.new(
                   address: raw,
-                  name: parsed["name"]?.try(&.as_s?) || raw,
-                  description: parsed["description"]?.try(&.as_s?) || "",
-                  tags: parsed["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
+                  name: parsed.str?("name") || raw,
+                  description: parsed.str?("description", ""),
+                  tags: parsed.str_arr?("tags", [] of String),
                 ))
               end
 
@@ -809,18 +809,18 @@ module Arcana
               @bus.send?(envelope)
 
             when "publish"
-              topic = parsed["topic"]?.try(&.as_s?) || ""
+              topic = parsed.str?("topic", "")
               envelope = parse_envelope(parsed)
               @bus.publish(topic, envelope)
 
             when "subscribe"
-              topic = parsed["topic"]?.try(&.as_s?) || ""
+              topic = parsed.str?("topic", "")
               if (addr = address) && !addr.empty? && !topic.empty?
                 @bus.subscribe(topic, addr)
               end
 
             when "unsubscribe"
-              topic = parsed["topic"]?.try(&.as_s?) || ""
+              topic = parsed.str?("topic", "")
               if (addr = address) && !addr.empty? && !topic.empty?
                 @bus.unsubscribe(topic, addr)
               end
@@ -844,12 +844,12 @@ module Arcana
       private def parse_envelope(parsed : JSON::Any) : Envelope
         env = parsed["envelope"]? || parsed
         Envelope.new(
-          from: env["from"]?.try(&.as_s?) || "",
-          to: env["to"]?.try(&.as_s?) || "",
-          subject: env["subject"]?.try(&.as_s?) || "",
+          from: env.str?("from", ""),
+          to: env.str?("to", ""),
+          subject: env.str?("subject", ""),
           payload: env["payload"]? || JSON::Any.new(nil),
-          correlation_id: env["correlation_id"]?.try(&.as_s?) || Random::Secure.hex(8),
-          reply_to: env["reply_to"]?.try(&.as_s?),
+          correlation_id: env.str?("correlation_id") || Random::Secure.hex(8),
+          reply_to: env.str?("reply_to"),
         )
       end
     end

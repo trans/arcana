@@ -237,7 +237,7 @@ help_svc = Arcana::Service.new(
   GUIDE
   tags: ["help", "discovery", "onboarding", "utility"],
 ) do |data|
-  topic = data["topic"]?.try(&.as_s?)
+  topic = data.str?("topic")
   text = if topic.nil?
            Arcana::Help::BRIEFING
          elsif topic == "list"
@@ -275,7 +275,7 @@ markdown_svc = Arcana::Service.new(
   tags: ["markdown", "text", "conversion", "utility"],
 ) do |data|
   text = data["text"].as_s
-  format = data["format"]?.try(&.as_s?) || "html"
+  format = data.str?("format", "html")
   result = case format
            when "ansi" then Arcana::Markdown.to_ansi(text)
            else             Arcana::Markdown.to_html(text)
@@ -319,14 +319,14 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(
         role: m["role"].as_s,
-        content: m["content"]?.try(&.as_s?),
+        content: m.str?("content"),
       )
     end
     request = Arcana::AI::Chat::Request.new(
       messages: msgs,
-      model: data["model"]?.try(&.as_s?) || "",
-      temperature: data["temperature"]?.try(&.as_f?) || 0.7,
-      max_tokens: data["max_tokens"]?.try(&.as_i?) || 150,
+      model: data.str?("model", ""),
+      temperature: data.float?("temperature", 0.7),
+      max_tokens: data.int?("max_tokens", 150),
     )
     response = chat_openai.complete(request)
     JSON::Any.new({
@@ -363,7 +363,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     texts = data["texts"].as_a.map(&.as_s)
     request = Arcana::AI::Embed::Request.new(
       texts: texts,
-      model: data["model"]?.try(&.as_s?) || "",
+      model: data.str?("model", ""),
     )
     result = embed_openai.embed(request)
     JSON::Any.new({
@@ -407,16 +407,16 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     GUIDE
     tags: ["tts", "speech", "audio", "openai"],
   ) do |data|
-    inline = data["inline"]?.try(&.as_bool?) || false
-    output_path = data["output_path"]?.try(&.as_s?)
+    inline = data.bool?("inline", false)
+    output_path = data.str?("output_path")
     raise "Provide either output_path or inline: true" if !inline && output_path.nil?
 
     request = Arcana::AI::TTS::Request.new(
       text: data["text"].as_s,
-      voice: data["voice"]?.try(&.as_s?) || "alloy",
-      response_format: data["format"]?.try(&.as_s?) || "opus",
-      instructions: data["instructions"]?.try(&.as_s?),
-      speed: data["speed"]?.try(&.as_f?),
+      voice: data.str?("voice", "alloy"),
+      response_format: data.str?("format", "opus"),
+      instructions: data.str?("instructions"),
+      speed: data.float?("speed"),
     )
 
     if inline
@@ -488,18 +488,18 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(
         role: m["role"].as_s,
-        content: m["content"]?.try(&.as_s?),
+        content: m.str?("content"),
       )
     end
     server_tools = nil
-    if data["web_search"]?.try(&.as_bool?)
+    if data.bool?("web_search")
       server_tools = [Arcana::AI::Chat::ServerTool.web_search] of Arcana::AI::Chat::ServerTool
     end
     request = Arcana::AI::Chat::Request.new(
       messages: msgs,
-      model: data["model"]?.try(&.as_s?) || "",
-      temperature: data["temperature"]?.try(&.as_f?) || 0.7,
-      max_tokens: data["max_tokens"]?.try(&.as_i?) || 4096,
+      model: data.str?("model", ""),
+      temperature: data.float?("temperature", 0.7),
+      max_tokens: data.int?("max_tokens", 4096),
       server_tools: server_tools,
     )
     response = chat_anthropic.complete(request)
@@ -546,14 +546,14 @@ if google_key = ENV["GOOGLE_API_KEY"]?
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(
         role: m["role"].as_s,
-        content: m["content"]?.try(&.as_s?),
+        content: m.str?("content"),
       )
     end
     request = Arcana::AI::Chat::Request.new(
       messages: msgs,
-      model: data["model"]?.try(&.as_s?) || "",
-      temperature: data["temperature"]?.try(&.as_f?) || 0.7,
-      max_tokens: data["max_tokens"]?.try(&.as_i?) || 4096,
+      model: data.str?("model", ""),
+      temperature: data.float?("temperature", 0.7),
+      max_tokens: data.int?("max_tokens", 4096),
     )
     response = chat_gemini.complete(request)
     JSON::Any.new({
@@ -599,10 +599,10 @@ if runware_key = ENV["RUNWARE_API_KEY"]?
   ) do |data|
     request = Arcana::AI::Image::Request.new(
       prompt: data["prompt"].as_s,
-      width: data["width"]?.try(&.as_i?) || 1024,
-      height: data["height"]?.try(&.as_i?) || 1024,
-      output_format: data["format"]?.try(&.as_s?) || "WEBP",
-      enhance_prompt: data["enhance_prompt"]?.try(&.as_bool?) || false,
+      width: data.int?("width", 1024),
+      height: data.int?("height", 1024),
+      output_format: data.str?("format", "WEBP"),
+      enhance_prompt: data.bool?("enhance_prompt", false),
     )
     result = image_runware.generate(request, data["output_path"].as_s)
     h = {
@@ -634,14 +634,14 @@ end
 if agents_json = ENV["ARCANA_AGENTS"]?
   JSON.parse(agents_json).as_a.each do |agent_def|
     address = agent_def["address"].as_s
-    name = agent_def["name"]?.try(&.as_s?) || address
-    provider_name = agent_def["provider"]?.try(&.as_s?) || "openai"
-    model = agent_def["model"]?.try(&.as_s?) || ""
-    system_prompt = agent_def["system_prompt"]?.try(&.as_s?) || "You are a helpful assistant on the Arcana bus."
-    max_tokens = agent_def["max_tokens"]?.try(&.as_i?) || 1024
-    temperature = agent_def["temperature"]?.try(&.as_f?) || 0.7
-    tags = agent_def["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String
-    description = agent_def["description"]?.try(&.as_s?) || "Autonomous LLM agent"
+    name = agent_def.str?("name") || address
+    provider_name = agent_def.str?("provider", "openai")
+    model = agent_def.str?("model", "")
+    system_prompt = agent_def.str?("system_prompt", "You are a helpful assistant on the Arcana bus.")
+    max_tokens = agent_def.int?("max_tokens", 1024)
+    temperature = agent_def.float?("temperature", 0.7)
+    tags = agent_def.str_arr?("tags", [] of String)
+    description = agent_def.str?("description", "Autonomous LLM agent")
 
     chat_provider = case provider_name
                     when "anthropic"

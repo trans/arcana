@@ -190,7 +190,7 @@ module Arcana
 
     private def handle_message(msg : JSON::Any) : JSON::Any?
       id = msg["id"]?
-      method = msg["method"]?.try(&.as_s?) || ""
+      method = msg.str?("method", "")
       params = msg["params"]? || JSON::Any.new({} of String => JSON::Any)
 
       case method
@@ -212,7 +212,7 @@ module Arcana
         jsonrpc_result(id, {tools: TOOLS})
 
       when "tools/call"
-        tool_name = params["name"]?.try(&.as_s?) || ""
+        tool_name = params.str?("name", "")
         args = params["arguments"]? || JSON::Any.new({} of String => JSON::Any)
         result = call_tool(tool_name, args)
         jsonrpc_result(id, {
@@ -223,16 +223,16 @@ module Arcana
         jsonrpc_result(id, {resources: resource_list})
 
       when "resources/read"
-        uri = params["uri"]?.try(&.as_s?) || ""
+        uri = params.str?("uri", "")
         jsonrpc_result(id, read_resource(uri))
 
       when "resources/subscribe"
-        uri = params["uri"]?.try(&.as_s?) || ""
+        uri = params.str?("uri", "")
         handle_subscribe(uri)
         jsonrpc_result(id, {} of String => String)
 
       when "resources/unsubscribe"
-        uri = params["uri"]?.try(&.as_s?) || ""
+        uri = params.str?("uri", "")
         handle_unsubscribe(uri)
         jsonrpc_result(id, {} of String => String)
 
@@ -278,15 +278,15 @@ module Arcana
     end
 
     private def call_directory(args : JSON::Any) : String
-      if address = args["address"]?.try(&.as_s?)
+      if address = args.str?("address")
         http_get("/directory/#{address}")
-      elsif query = args["query"]?.try(&.as_s?)
+      elsif query = args.str?("query")
         http_get("/directory?q=#{URI.encode_path_segment(query)}")
-      elsif tag = args["tag"]?.try(&.as_s?)
+      elsif tag = args.str?("tag")
         http_get("/directory?tag=#{URI.encode_path_segment(tag)}")
-      elsif capability = args["capability"]?.try(&.as_s?)
+      elsif capability = args.str?("capability")
         http_get("/directory?capability=#{URI.encode_path_segment(capability)}")
-      elsif kind = args["kind"]?.try(&.as_s?)
+      elsif kind = args.str?("kind")
         http_get("/directory?kind=#{kind}")
       else
         http_get("/directory")
@@ -294,37 +294,37 @@ module Arcana
     end
 
     private def call_deliver(args : JSON::Any) : String
-      ordering = args["ordering"]?.try(&.as_s?) || "auto"
+      ordering = args.str?("ordering", "auto")
       body = {
-        from:       args["from"]?.try(&.as_s?) || "mcp-bridge",
-        to:         args["to"]?.try(&.as_s?) || "",
-        subject:    args["subject"]?.try(&.as_s?) || "",
+        from:       args.str?("from", "mcp-bridge"),
+        to:         args.str?("to", ""),
+        subject:    args.str?("subject", ""),
         payload:    args["payload"]? || JSON::Any.new(nil),
         ordering:   ordering,
-        timeout_ms: args["timeout_ms"]?.try(&.as_i?) || 30_000,
+        timeout_ms: args.int?("timeout_ms", 30_000),
       }.to_json
       http_post("/deliver", body)
     end
 
     private def call_publish(args : JSON::Any) : String
       body = {
-        from:    args["from"]?.try(&.as_s?) || "mcp-bridge",
-        topic:   args["topic"]?.try(&.as_s?) || "",
-        subject: args["subject"]?.try(&.as_s?) || "",
+        from:    args.str?("from", "mcp-bridge"),
+        topic:   args.str?("topic", ""),
+        subject: args.str?("subject", ""),
         payload: args["payload"]? || JSON::Any.new(nil),
       }.to_json
       http_post("/publish", body)
     end
 
     private def call_register(args : JSON::Any) : String
-      address = args["address"]?.try(&.as_s?) || ""
-      action = args["action"]?.try(&.as_s?) || "register"
+      address = args.str?("address", "")
+      action = args.str?("action", "register")
 
       case action
       when "unregister"
         body = {
           address: address,
-          token:   args["token"]?.try(&.as_s?),
+          token:   args.str?("token"),
         }.to_json
         result = http_post("/unregister", body)
 
@@ -335,22 +335,22 @@ module Arcana
 
         result
       when "busy"
-        body = {address: address, token: args["token"]?.try(&.as_s?), busy: true}.to_json
+        body = {address: address, token: args.str?("token"), busy: true}.to_json
         http_post("/busy", body)
       when "idle"
-        body = {address: address, token: args["token"]?.try(&.as_s?), busy: false}.to_json
+        body = {address: address, token: args.str?("token"), busy: false}.to_json
         http_post("/busy", body)
       else # "register"
         body = {
           address:     address,
-          token:       args["token"]?.try(&.as_s?),
-          name:        args["name"]?.try(&.as_s?),
-          description: args["description"]?.try(&.as_s?),
-          kind:        args["kind"]?.try(&.as_s?),
-          capability:  args["capability"]?.try(&.as_s?),
-          guide:       args["guide"]?.try(&.as_s?),
+          token:       args.str?("token"),
+          name:        args.str?("name"),
+          description: args.str?("description"),
+          kind:        args.str?("kind"),
+          capability:  args.str?("capability"),
+          guide:       args.str?("guide"),
           tags:        args["tags"]?,
-          listed:      args["listed"]?.try(&.as_bool?),
+          listed:      args.bool?("listed"),
         }.to_json
         result = http_post("/register", body)
 
@@ -366,38 +366,38 @@ module Arcana
 
     private def call_inbox(args : JSON::Any) : String
       body = {
-        address: args["address"]?.try(&.as_s?) || "",
-        token:   args["token"]?.try(&.as_s?),
+        address: args.str?("address", ""),
+        token:   args.str?("token"),
       }.to_json
       http_post("/inbox", body)
     end
 
     private def call_receive(args : JSON::Any) : String
       h = {} of String => JSON::Any
-      h["address"] = JSON::Any.new(args["address"]?.try(&.as_s?) || "")
-      if token = args["token"]?.try(&.as_s?)
+      h["address"] = JSON::Any.new(args.str?("address", ""))
+      if token = args.str?("token")
         h["token"] = JSON::Any.new(token)
       end
-      if id = args["id"]?.try(&.as_s?)
+      if id = args.str?("id")
         h["id"] = JSON::Any.new(id)
       end
-      timeout_ms = args["timeout_ms"]?.try(&.as_i64?) || 0_i64
+      timeout_ms = args.i64?("timeout_ms") || 0_i64
       h["timeout_ms"] = JSON::Any.new(timeout_ms) if timeout_ms > 0 || !id
       http_post("/receive", h.to_json)
     end
 
     private def call_expect(args : JSON::Any) : String
-      address = args["address"]?.try(&.as_s?) || ""
-      action = args["action"]?.try(&.as_s?) || "check"
+      address = args.str?("address", "")
+      action = args.str?("action", "check")
       case action
       when "check"
-        body = {address: address, token: args["token"]?.try(&.as_s?)}.to_json
+        body = {address: address, token: args.str?("token")}.to_json
         http_post("/outstanding", body)
       when "await"
         body = {
           address:    address,
-          token:      args["token"]?.try(&.as_s?),
-          timeout_ms: args["timeout_ms"]?.try(&.as_i?) || 30_000,
+          token:      args.str?("token"),
+          timeout_ms: args.int?("timeout_ms", 30_000),
         }.to_json
         http_post("/await", body)
       else
@@ -406,33 +406,33 @@ module Arcana
     end
 
     private def call_freeze(args : JSON::Any) : String
-      address = args["address"]?.try(&.as_s?) || ""
-      action = args["action"]?.try(&.as_s?) || "list"
+      address = args.str?("address", "")
+      action = args.str?("action", "list")
       case action
       when "freeze"
         body = {
           address: address,
-          token:   args["token"]?.try(&.as_s?),
-          id:      args["id"]?.try(&.as_s?) || "",
-          by:      args["by"]?.try(&.as_s?) || "",
+          token:   args.str?("token"),
+          id:      args.str?("id", ""),
+          by:      args.str?("by", ""),
         }.to_json
         http_post("/freeze", body)
       when "thaw"
         body = {
           address: address,
-          token:   args["token"]?.try(&.as_s?),
-          id:      args["id"]?.try(&.as_s?) || "",
+          token:   args.str?("token"),
+          id:      args.str?("id", ""),
         }.to_json
         http_post("/thaw", body)
       when "thaw_all"
         body = {
           address: address,
-          token:   args["token"]?.try(&.as_s?),
+          token:   args.str?("token"),
           all:     true,
         }.to_json
         http_post("/thaw", body)
       when "list"
-        body = {address: address, token: args["token"]?.try(&.as_s?)}.to_json
+        body = {address: address, token: args.str?("token")}.to_json
         http_post("/frozen", body)
       else
         %({"error":"unknown action: #{action}"})
@@ -445,16 +445,16 @@ module Arcana
 
     private def call_events(args : JSON::Any) : String
       params = [] of String
-      if type = args["type"]?.try(&.as_s?)
+      if type = args.str?("type")
         params << "type=#{URI.encode_path_segment(type)}"
       end
-      if subject = args["subject"]?.try(&.as_s?)
+      if subject = args.str?("subject")
         params << "subject=#{URI.encode_path_segment(subject)}"
       end
-      if since = args["since"]?.try(&.as_s?)
+      if since = args.str?("since")
         params << "since=#{URI.encode_path_segment(since)}"
       end
-      if limit = args["limit"]?.try(&.as_i?)
+      if limit = args.int?("limit")
         params << "limit=#{limit}"
       end
       qs = params.empty? ? "" : "?#{params.join('&')}"
@@ -511,7 +511,7 @@ module Arcana
               body = {address: address}.to_json
               response = http_post("/peek", body)
               parsed = JSON.parse(response)
-              count = parsed["pending"]?.try(&.as_i?) || 0
+              count = parsed.int?("pending", 0)
 
               last = last_counts[address]? || 0
               if count > 0 && count != last

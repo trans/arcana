@@ -130,15 +130,15 @@ module Arcana
         end
         listing = Directory::Listing.new(
           address: address,
-          name: entry["name"]?.try(&.as_s?) || address,
-          description: entry["description"]?.try(&.as_s?) || "",
+          name: entry.str?("name") || address,
+          description: entry.str?("description", ""),
           schema: entry["schema"]?,
-          guide: entry["guide"]?.try(&.as_s?),
-          tags: entry["tags"]?.try(&.as_a?.try(&.map(&.as_s))) || [] of String,
+          guide: entry.str?("guide"),
+          tags: entry.str_arr?("tags", [] of String),
         )
         unless directory.lookup(address)
           directory.register(listing)
-          if last_seen_raw = entry["last_seen"]?.try(&.as_s?)
+          if last_seen_raw = entry.str?("last_seen")
             ts = (Time.parse_rfc3339(last_seen_raw) rescue nil)
             directory.set_last_seen(address, ts) if ts
           end
@@ -161,19 +161,19 @@ module Arcana
 
         frozen = {} of String => Envelope
         frozen_by = {} of String => String
-        if frozen_raw = entry["frozen"]?.try(&.as_a?)
+        if frozen_raw = entry.arr?("frozen")
           frozen_raw.each do |fe|
             id = fe["id"].as_s
             env = Envelope.from_json(fe["envelope"].to_json)
             frozen[id] = env
-            if by = fe["by"]?.try(&.as_s?)
+            if by = fe.str?("by")
               frozen_by[id] = by unless by.empty?
             end
           end
         end
 
         mb.load_snapshot(messages, frozen, frozen_by)
-        if la_raw = entry["last_activity"]?.try(&.as_s?)
+        if la_raw = entry.str?("last_activity")
           ts = (Time.parse_rfc3339(la_raw) rescue nil)
           mb.last_activity = ts if ts
         end
