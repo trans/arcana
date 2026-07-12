@@ -760,8 +760,8 @@ Signal::TERM.trap { shutdown.call(Signal::TERM) }
 
 # -- Periodic prune of stale agent listings and inactive mailboxes --
 
-listing_ttl = (ENV["ARCANA_AGENT_TTL"]? || "86400").to_i.seconds    # 24h default
-mailbox_ttl = (ENV["ARCANA_MAILBOX_TTL"]? || "259200").to_i.seconds # 72h default
+listing_ttl = (ENV["ARCANA_AGENT_TTL"]? || "604800").to_i.seconds     # 7d default
+mailbox_ttl = (ENV["ARCANA_MAILBOX_TTL"]? || "2592000").to_i.seconds  # 30d default
 prune_interval = (ENV["ARCANA_PRUNE_INTERVAL"]? || "3600").to_i.seconds # hourly default
 
 prune_now = ->{

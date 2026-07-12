@@ -1,3 +1,14 @@
+arcana (0.20.4-1) unstable; urgency=medium
+
+  * Bump default prune TTLs. ARCANA_AGENT_TTL default 24h -> 7d;
+    ARCANA_MAILBOX_TTL default 72h -> 30d. Prune interval stays hourly.
+    An idle agent that hasn't sent/received/registered in a day was
+    getting evicted mid-work; the new defaults leave a week of grace
+    on the listing and a month on the mailbox before either goes.
+    Override via the env vars if you need shorter cleanup.
+
+ -- trans <transfire@gmail.com>  Sun, 12 Jul 2026 00:00:00 +0000
+
 arcana (0.20.3-1) unstable; urgency=medium
 
   * openai:tts service gains an `inline: true` option. When set, the
