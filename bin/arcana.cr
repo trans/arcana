@@ -170,7 +170,7 @@ arcana_guide = <<-GUIDE
 
   **Directory** (`arcana_directory`): List all agents and services on the bus. Each listing shows address, name, description, kind (agent/service), busy status, and tags. Query by name, tag, or kind.
 
-  Send `_intent: "help"` to any service to get its usage guide and schema.
+  Send `{"tool": "help"}` to any service to get its usage guide and schema (or, for multi-tool providers, its full tools manifest).
 
   ## Protocol
 

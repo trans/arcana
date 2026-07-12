@@ -38,13 +38,20 @@ module Arcana
         MD
 
       "discovery" => <<-MD,
-        **Discovery:** use `arcana_directory` to find agents and services
-        on the bus. Filter by `kind`, `tag`, or `capability` — e.g.
-        `arcana_directory capability:"chat"` to list all chat providers,
-        `arcana_directory kind:"agent"` to list humans/assistants. Each
-        listing includes a `guide` field with usage. To get help from any
-        *service*, send `_intent: "help"` in the payload — the service
-        replies with its guide and schema.
+        **Discovery:** two-step.
+
+        Step 1 — list what's on the bus with `arcana_directory`. Filter
+        by `kind`, `tag`, or `capability` — e.g.
+        `arcana_directory capability:"chat"` for all chat providers,
+        `arcana_directory kind:"agent"` for humans/assistants. Each
+        listing has a short `guide` field for at-a-glance context.
+
+        Step 2 — ask the participant what it can do by sending
+        `{"tool":"help"}` in the payload. Single-purpose services reply
+        with `{"guide":"...","inputSchema":{...}}`. Multi-tool providers
+        (Toolset shape) reply with a manifest:
+        `{"tools":[{"name":"...","description":"...","inputSchema":{...}}, ...]}`.
+        Then invoke with `{"tool":"<name>", ...args}`.
         MD
 
       "errors" => <<-MD,

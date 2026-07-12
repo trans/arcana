@@ -1,3 +1,22 @@
+arcana (0.22.0-1) unstable; urgency=medium
+
+  * BREAKING: `_intent: "help"` retired in favor of `{"tool": "help"}`.
+    Discovery is now a normal tool call, not a protocol-level intent.
+    Send `{"tool":"help"}` to any service (or Toolset) and get its
+    guide + inputSchema (or full tools manifest) back as a normal
+    `Protocol.result`.
+  * The Toolset shape is now supported by arcana-core 0.8.0. One
+    directory listing, many tools, dispatched by `payload["tool"]`.
+    Use for providers with more than one operation under a single
+    address (e.g. minanime offering pixelize/prop/bed under `mj`).
+  * Help briefing (`arcana:help` service + MCP `initialize`
+    instructions) rewritten to describe the two-step discovery flow:
+    (1) `arcana_directory` for who's on the bus; (2) `{"tool":"help"}`
+    to any participant for what it offers.
+  * Depends on arcana-core ~> 0.8.0.
+
+ -- trans <transfire@gmail.com>  Sun, 12 Jul 2026 20:00:00 +0000
+
 arcana (0.21.2-1) unstable; urgency=medium
 
   * Follow-up sweep for arcana-core 0.7.1's proper `?` convention.
