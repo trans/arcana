@@ -131,10 +131,10 @@ module Arcana
         listing = Directory::Listing.new(
           address: address,
           name: entry.str?("name") || address,
-          description: entry.str?("description", ""),
+          description: entry.str("description"),
           schema: entry["schema"]?,
           guide: entry.str?("guide"),
-          tags: entry.str_arr?("tags", [] of String),
+          tags: entry.str_arr("tags"),
         )
         unless directory.lookup(address)
           directory.register(listing)

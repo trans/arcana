@@ -1,3 +1,14 @@
+arcana (0.21.2-1) unstable; urgency=medium
+
+  * Follow-up sweep for arcana-core 0.7.1's proper `?` convention.
+    Every `payload.str?("k", "")` collapsed to `payload.str("k")`;
+    every `payload.str?("k", "specific")` collapsed to
+    `payload.str("k", "specific")`. Same for int/i64/float/bool/str_arr.
+    Bare nullable-return calls like `payload.str?("k")` preserved.
+  * Depends on arcana-core ~> 0.7.1.
+
+ -- trans <transfire@gmail.com>  Sun, 12 Jul 2026 18:00:00 +0000
+
 arcana (0.21.1-1) unstable; urgency=medium
 
   * Sweep the codebase for the `payload["field"]?.try(&.as_s?) || def`

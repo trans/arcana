@@ -90,7 +90,7 @@ module Arcana
     private def check_token!(address : String, parsed : JSON::Any)
       expected = @tokens[address]?
       return unless expected  # no token set = no auth required
-      given = parsed.str?("token", "")
+      given = parsed.str("token")
       unless given == expected
         @events.try &.record(Events::Event.new(
           type: "auth.failed",
@@ -236,7 +236,7 @@ module Arcana
 
     private def handle_post_register(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed.str?("address", "")
+      address = parsed.str("address")
       raise "address required" if address.empty?
       Directory.validate_address(address)
 
@@ -261,12 +261,12 @@ module Arcana
         @directory.register(Directory::Listing.new(
           address: address,
           name: parsed.str?("name") || address,
-          description: parsed.str?("description", ""),
+          description: parsed.str("description"),
           kind: kind,
           capability: parsed.str?("capability"),
           schema: parsed["schema"]?,
           guide: parsed.str?("guide"),
-          tags: parsed.str_arr?("tags", [] of String),
+          tags: parsed.str_arr("tags"),
         ))
       end
       save_state
@@ -279,7 +279,7 @@ module Arcana
 
     private def handle_post_unregister(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed.str?("address", "")
+      address = parsed.str("address")
       raise "address required" if address.empty?
 
       check_token!(address, parsed)
@@ -297,7 +297,7 @@ module Arcana
 
     private def handle_post_inbox(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed.str?("address", "")
+      address = parsed.str("address")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
@@ -311,7 +311,7 @@ module Arcana
 
     private def handle_post_receive(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed.str?("address", "")
+      address = parsed.str("address")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
@@ -320,7 +320,7 @@ module Arcana
 
       # Selective receive by id (with optional timeout)
       if id = parsed.str?("id")
-        timeout_ms = parsed.int?("timeout_ms", 0)
+        timeout_ms = parsed.int("timeout_ms")
         msg = if timeout_ms > 0
                 mb.receive(id, timeout_ms.milliseconds)
               else
@@ -334,7 +334,7 @@ module Arcana
         return
       end
 
-      timeout_ms = parsed.int?("timeout_ms", 0)
+      timeout_ms = parsed.int("timeout_ms")
       messages = [] of Envelope
 
       if timeout_ms > 0 && messages.empty?
@@ -381,7 +381,7 @@ module Arcana
         envelope = envelope_from_json(parsed)
         failed_addr = envelope.to
         check_sender!(envelope.from)
-        timeout_ms = parsed.int?("timeout_ms", 30_000)
+        timeout_ms = parsed.int("timeout_ms", 30_000)
         timeout = timeout_ms.milliseconds
 
         # Use strict deliver (raises if no mailbox). Silent drops are worse
@@ -487,7 +487,7 @@ module Arcana
     private def handle_post_request(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
       envelope = envelope_from_json(parsed)
-      timeout_ms = parsed.int?("timeout_ms", 30_000)
+      timeout_ms = parsed.int("timeout_ms", 30_000)
       timeout = timeout_ms.milliseconds
 
       result = @bus.request(envelope, timeout: timeout)
@@ -504,7 +504,7 @@ module Arcana
 
     private def handle_post_outstanding(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed.str?("address", "")
+      address = parsed.str("address")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
@@ -518,12 +518,12 @@ module Arcana
 
     private def handle_post_await(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed.str?("address", "")
+      address = parsed.str("address")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
 
-      timeout_ms = parsed.int?("timeout_ms", 30_000)
+      timeout_ms = parsed.int("timeout_ms", 30_000)
       mb = @bus.mailbox(resolved)
       all_met = mb.await_outstanding(timeout_ms.milliseconds)
       ctx.response.print %({"address":"#{resolved}","all_met":#{all_met}})
@@ -534,14 +534,14 @@ module Arcana
 
     private def handle_post_freeze(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed.str?("address", "")
+      address = parsed.str("address")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
 
-      id = parsed.str?("id", "")
+      id = parsed.str("id")
       raise "id required" if id.empty?
-      by = parsed.str?("by", "")
+      by = parsed.str("by")
 
       mb = @bus.mailbox(resolved)
       if mb.freeze(id, by)
@@ -557,7 +557,7 @@ module Arcana
 
     private def handle_post_thaw(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed.str?("address", "")
+      address = parsed.str("address")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
@@ -567,7 +567,7 @@ module Arcana
         count = mb.thaw_all
         ctx.response.print %({"ok":true,"thawed":#{count}})
       else
-        id = parsed.str?("id", "")
+        id = parsed.str("id")
         raise "id required" if id.empty?
         mb = @bus.mailbox(resolved)
         if mb.thaw(id)
@@ -584,7 +584,7 @@ module Arcana
 
     private def handle_post_frozen(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed.str?("address", "")
+      address = parsed.str("address")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
@@ -598,12 +598,12 @@ module Arcana
 
     private def handle_post_busy(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed.str?("address", "")
+      address = parsed.str("address")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
 
-      busy = parsed.bool?("busy", false)
+      busy = parsed.bool("busy")
       @directory.set_busy(resolved, busy)
       ctx.response.print %({"ok":true,"address":"#{resolved}","busy":#{busy}})
     rescue ex
@@ -613,7 +613,7 @@ module Arcana
 
     private def handle_post_peek(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      address = parsed.str?("address", "")
+      address = parsed.str("address")
       raise "address required" if address.empty?
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
@@ -627,7 +627,7 @@ module Arcana
 
     private def handle_post_publish(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      topic = parsed.str?("topic", "")
+      topic = parsed.str("topic")
       envelope = envelope_from_json(parsed)
       check_sender!(envelope.from)
       @bus.publish(topic, envelope)
@@ -668,9 +668,9 @@ module Arcana
                  else              Ordering::Auto
                  end
       Envelope.new(
-        from: env.str?("from", ""),
-        to: env.str?("to", ""),
-        subject: env.str?("subject", ""),
+        from: env.str("from"),
+        to: env.str("to"),
+        subject: env.str("subject"),
         payload: normalize_payload(env["payload"]?),
         correlation_id: env.str?("correlation_id") || Random::Secure.hex(8),
         reply_to: env.str?("reply_to"),
@@ -766,7 +766,7 @@ module Arcana
         ws.on_message do |msg|
           begin
             parsed = JSON.parse(msg)
-            type = parsed.str?("type", "")
+            type = parsed.str("type")
 
             case type
             when "join"
@@ -785,8 +785,8 @@ module Arcana
                 @directory.register(Directory::Listing.new(
                   address: raw,
                   name: parsed.str?("name") || raw,
-                  description: parsed.str?("description", ""),
-                  tags: parsed.str_arr?("tags", [] of String),
+                  description: parsed.str("description"),
+                  tags: parsed.str_arr("tags"),
                 ))
               end
 
@@ -809,18 +809,18 @@ module Arcana
               @bus.send?(envelope)
 
             when "publish"
-              topic = parsed.str?("topic", "")
+              topic = parsed.str("topic")
               envelope = parse_envelope(parsed)
               @bus.publish(topic, envelope)
 
             when "subscribe"
-              topic = parsed.str?("topic", "")
+              topic = parsed.str("topic")
               if (addr = address) && !addr.empty? && !topic.empty?
                 @bus.subscribe(topic, addr)
               end
 
             when "unsubscribe"
-              topic = parsed.str?("topic", "")
+              topic = parsed.str("topic")
               if (addr = address) && !addr.empty? && !topic.empty?
                 @bus.unsubscribe(topic, addr)
               end
@@ -844,9 +844,9 @@ module Arcana
       private def parse_envelope(parsed : JSON::Any) : Envelope
         env = parsed["envelope"]? || parsed
         Envelope.new(
-          from: env.str?("from", ""),
-          to: env.str?("to", ""),
-          subject: env.str?("subject", ""),
+          from: env.str("from"),
+          to: env.str("to"),
+          subject: env.str("subject"),
           payload: env["payload"]? || JSON::Any.new(nil),
           correlation_id: env.str?("correlation_id") || Random::Secure.hex(8),
           reply_to: env.str?("reply_to"),
