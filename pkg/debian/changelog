@@ -1,3 +1,28 @@
+arcana (0.24.0-1) unstable; urgency=medium
+
+  * BREAKING: every default provider is now a Toolset. The
+    `owner:capability` service addresses are gone from the built-ins.
+    - `arcana:echo`, `arcana:markdown` → tools on the `arcana` Toolset
+    - `arcana:help` gone (redundant with MCP `initialize` instructions
+      and `arcana`'s own directory guide field)
+    - `openai:chat`, `openai:embed`, `openai:tts` → tools on the
+      `openai` Toolset
+    - `anthropic:chat` → tool on the `anthropic` Toolset
+    - `gemini:chat` → tool on the `gemini` Toolset
+    - `runware:image` → tool on the `runware` Toolset
+    - Standalone `arcana` library-as-thing agent listing dropped;
+      the `arcana` Toolset is the new listing.
+  * Discovery flow becomes uniformly two-step: (1) `arcana_directory`
+    to find entities (filter by `tag: "chat"` for chat providers,
+    etc.); (2) `{"tool":"help"}` to any entity for its tools manifest.
+  * Callers migrating: `deliver to:"openai:chat" payload:{messages:...}`
+    becomes `deliver to:"openai" payload:{tool:"chat", messages:...}`.
+    Same fields, just prefix with `tool: "<name>"`.
+  * `did_you_mean` on old-shape addresses will not cross-suggest
+    (the sigil/colon-form split is respected).
+
+ -- trans <transfire@gmail.com>  Sun, 13 Jul 2026 12:00:00 +0000
+
 arcana (0.23.0-1) unstable; urgency=medium
 
   * `@`-sigil convention for agent handles. A project's Claude/Codex

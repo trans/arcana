@@ -47,17 +47,20 @@ module Arcana
         **Discovery:** two-step.
 
         Step 1 — list what's on the bus with `arcana_directory`. Filter
-        by `kind`, `tag`, or `capability` — e.g.
-        `arcana_directory capability:"chat"` for all chat providers,
-        `arcana_directory kind:"agent"` for humans/assistants. Each
-        listing has a short `guide` field for at-a-glance context.
+        by `kind`, `tag`, or `capability`. Providers advertise their
+        offerings via `tags` — e.g. `arcana_directory tag:"chat"` finds
+        every entity that offers a chat tool (openai, anthropic, gemini,
+        ...). `arcana_directory kind:"agent"` lists humans/assistants.
+        Each listing has a short `guide` for at-a-glance context.
 
-        Step 2 — ask the participant what it can do by sending
-        `{"tool":"help"}` in the payload. Single-purpose services reply
-        with `{"guide":"...","inputSchema":{...}}`. Multi-tool providers
-        (Toolset shape) reply with a manifest:
-        `{"tools":[{"name":"...","description":"...","inputSchema":{...}}, ...]}`.
+        Step 2 — ask any participant what it offers by sending
+        `{"tool":"help"}`. The reply is a Protocol.result wrapping a
+        manifest: `{"name":"...","description":"...","tools":[{"name":"...","description":"...","inputSchema":{...}}, ...]}`.
         Then invoke with `{"tool":"<name>", ...args}`.
+
+        Default built-in providers use this shape — `arcana` for
+        utilities (echo, markdown), `openai` for chat/embed/tts,
+        `anthropic` for chat, `gemini` for chat, `runware` for image.
         MD
 
       "errors" => <<-MD,

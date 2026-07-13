@@ -33,7 +33,7 @@ module Arcana
             query:      {type: "string", description: "Search query (matches name, description, tags)"},
             tag:        {type: "string", description: "Filter by tag"},
             kind:       {type: "string", enum: ["agent", "service"], description: "Filter by kind"},
-            capability: {type: "string", description: "Filter by capability (e.g. 'chat', 'image', 'tts', 'embed', 'markdown')"},
+            capability: {type: "string", description: "Filter by capability field on the listing. Providers usually advertise via tags instead — try `tag: \"chat\"` to find every entity that offers a chat tool."},
             address:    {type: "string", description: "Look up a specific address"},
           },
         },

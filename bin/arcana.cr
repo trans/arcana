@@ -198,93 +198,30 @@ arcana_guide = <<-GUIDE
   MCP: 9 tools for full bus access from Claude Code or any MCP client
 GUIDE
 
-# -- Built-in services --
+# -- Built-in Toolsets --
+#
+# Each provider (arcana utilities, openai, anthropic, ...) registers as
+# a single entity on the bus with its capabilities exposed as tools.
+# Discovery: send `{"tool":"help"}` to any entity for its manifest.
+# Cross-provider: filter the directory by tag (e.g. `tag:"chat"`).
 
-dir.register(Arcana::Directory::Listing.new(
+# Arcana utility Toolset — echo + markdown, plus the auto-generated help.
+arcana_ts = Arcana::Toolset.new(
+  bus: bus, directory: dir,
   address: "arcana",
   name: "Arcana",
-  description: "Provider-agnostic AI communication library for Crystal. Arcana provides unified interfaces for chat completion, image generation, text-to-speech, and embeddings, plus an agent-to-agent communication bus with pub/sub, request/response, and OTP-style supervision.",
-  guide: arcana_guide,
-  tags: ["ai", "crystal", "library", "chat", "image", "tts", "embed", "bus", "agents"],
-))
-# Create mailbox so messages can queue before the agent connects
-bus.mailbox("arcana")
+  description: "Provider-agnostic AI communication library for Crystal. Arcana provides unified interfaces for chat, image, text-to-speech, and embeddings, plus an agent-to-agent communication bus with pub/sub, request/response, and OTP-style supervision.",
+  tags: ["utility", "test", "markdown", "arcana"],
+)
 
-# Echo service — useful for testing the bus.
-echo = Arcana::Service.new(
-  bus: bus, directory: dir,
-  address: "arcana:echo",
-  name: "Echo",
-  description: "Echoes back whatever you send. Useful for testing bus connectivity.",
-  capability: "echo",
-  guide: "Send any payload and it will be returned as-is in a result response. No schema required.",
-  tags: ["test", "utility"],
-) { |data| data }
-echo.start
-
-# Help service — like 411. Returns the bus workflow briefing.
-# Same text as the MCP initialize briefing, kept in sync via Arcana::Help.
-help_schema = JSON.parse(%({"type":"object","properties":{"topic":{"type":"string","description":"Optional topic name. Omit for full briefing. Use 'list' for available topic names."}}}))
-
-help_svc = Arcana::Service.new(
-  bus: bus, directory: dir,
-  address: "arcana:help",
-  name: "Help",
-  description: "Workflow briefing for new bus clients. Like 411 — call when you don't know where to start.",
-  capability: "help",
-  schema: help_schema,
-  guide: <<-GUIDE,
-  Get the bus workflow briefing — how to register, discover, send, receive.
-
-  Send: {} (or no payload)              → full briefing
-  Send: {"topic": "workflow"}           → just the workflow section
-  Send: {"topic": "addressing"}         → addressing rules
-  Send: {"topic": "discovery"}          → how to find services
-  Send: {"topic": "errors"}             → error handling, did_you_mean
-  Send: {"topic": "list"}               → list of available topic names
-
-  Unknown topics return the list of valid topics in the error.
-  GUIDE
-  tags: ["help", "discovery", "onboarding", "utility"],
-) do |data|
-  topic = data.str?("topic")
-  text = if topic.nil?
-           Arcana::Help::BRIEFING
-         elsif topic == "list"
-           "Available topics: #{Arcana::Help.topics.join(", ")}"
-         elsif t = Arcana::Help.topic(topic)
-           t
-         else
-           raise "unknown topic '#{topic}' — available: #{Arcana::Help.topics.join(", ")}"
-         end
-  JSON::Any.new({"text" => JSON::Any.new(text)})
+arcana_ts.tool("echo", "Echoes back whatever you send. Useful for testing bus connectivity.") do |data|
+  data
 end
-help_svc.start
 
-# Markdown conversion service
 markdown_schema = JSON.parse(%({"type":"object","properties":{"text":{"type":"string","description":"Markdown text to convert"},"format":{"type":"string","enum":["html","ansi"],"description":"Output format: html (default) or ansi"}},"required":["text"]}))
 
-markdown_svc = Arcana::Service.new(
-  bus: bus, directory: dir,
-  address: "arcana:markdown",
-  name: "Markdown Converter",
-  description: "Converts Markdown to HTML or ANSI terminal output.",
-  capability: "markdown",
-  schema: markdown_schema,
-  guide: <<-GUIDE,
-  Convert Markdown text to HTML or ANSI-styled terminal output.
-
-  Example: {"text": "# Hello\\n\\n**bold** text"}
-  With format: {"text": "# Hello", "format": "ansi"}
-
-  Optional fields:
-    format: "html" (default) or "ansi"
-
-  Returns: {"result": "<h1>Hello</h1>\\n<p><strong>bold</strong> text</p>", "format": "html"}
-  GUIDE
-  tags: ["markdown", "text", "conversion", "utility"],
-) do |data|
-  text = data["text"].as_s
+arcana_ts.tool("markdown", "Convert Markdown to HTML or ANSI terminal output.", input_schema: markdown_schema) do |data|
+  text = data.str("text")
   format = data.str("format", "html")
   result = case format
            when "ansi" then Arcana::Markdown.to_ansi(text)
@@ -295,42 +232,31 @@ markdown_svc = Arcana::Service.new(
     "format" => JSON::Any.new(format),
   })
 end
-markdown_svc.start
+
+arcana_ts.start
 
 # -- Provider-backed services (only registered when API keys are present) --
 
 if openai_key = ENV["OPENAI_API_KEY"]?
   chat_openai = Arcana::AI::Chat::OpenAI.new(api_key: openai_key)
+  embed_openai = Arcana::AI::Embed::OpenAI.new(api_key: openai_key)
+  tts_openai = Arcana::AI::TTS::OpenAI.new(api_key: openai_key)
+
+  openai_ts = Arcana::Toolset.new(
+    bus: bus, directory: dir,
+    address: "openai",
+    name: "OpenAI",
+    description: "OpenAI provider — chat completion, embeddings, text-to-speech.",
+    tags: ["chat", "embed", "tts", "llm", "openai"],
+  )
+
   chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150)"}},"required":["messages"]}))
 
-  chat_openai_svc = Arcana::Service.new(
-    bus: bus, directory: dir,
-    address: "openai:chat",
-    name: "OpenAI Chat",
-    capability: "chat",
-    description: "Chat completion via OpenAI-compatible API.",
-    schema: chat_openai_schema,
-    guide: <<-GUIDE,
-    Send a messages array to get a chat completion.
-
-    Example request:
-      {"messages": [{"role": "user", "content": "Hello!"}]}
-
-    Optional fields:
-      model: "gpt-4o", "gpt-4o-mini" (default), etc.
-      temperature: 0.0-2.0 (default 0.7)
-      max_tokens: response limit (default 150)
-
-    Returns: {"content": "...", "model": "...", "finish_reason": "...",
-              "prompt_tokens": N, "completion_tokens": N}
-    GUIDE
-    tags: ["chat", "llm", "openai"],
-  ) do |data|
+  openai_ts.tool("chat",
+    "Chat completion. Send messages array; get content, model, finish_reason, token counts back.",
+    input_schema: chat_openai_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
-      Arcana::AI::Chat::Message.new(
-        role: m["role"].as_s,
-        content: m.str?("content"),
-      )
+      Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
     end
     request = Arcana::AI::Chat::Request.new(
       messages: msgs,
@@ -347,34 +273,14 @@ if openai_key = ENV["OPENAI_API_KEY"]?
       "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
     })
   end
-  chat_openai_svc.start
 
-  # Embed service
-  embed_openai = Arcana::AI::Embed::OpenAI.new(api_key: openai_key)
   embed_schema = JSON.parse(%({"type":"object","properties":{"texts":{"type":"array","items":{"type":"string"},"description":"Texts to embed"},"model":{"type":"string","description":"Model (default: text-embedding-3-small)"}},"required":["texts"]}))
 
-  embed_svc = Arcana::Service.new(
-    bus: bus, directory: dir,
-    address: "openai:embed",
-    name: "OpenAI Embeddings",
-    capability: "embed",
-    description: "Generate text embeddings via OpenAI.",
-    schema: embed_schema,
-    guide: <<-GUIDE,
-    Send an array of texts to get embedding vectors.
-
-    Example: {"texts": ["Hello world", "Goodbye"]}
-
-    Returns: {"embeddings": [[0.1, ...], [0.2, ...]], "dimensions": 1536,
-              "total_tokens": N}
-    GUIDE
-    tags: ["embed", "openai", "vectors"],
-  ) do |data|
+  openai_ts.tool("embed",
+    "Generate text embedding vectors for an array of texts.",
+    input_schema: embed_schema) do |data|
     texts = data["texts"].as_a.map(&.as_s)
-    request = Arcana::AI::Embed::Request.new(
-      texts: texts,
-      model: data.str("model"),
-    )
+    request = Arcana::AI::Embed::Request.new(texts: texts, model: data.str("model"))
     result = embed_openai.embed(request)
     JSON::Any.new({
       "embeddings"   => JSON::Any.new(result.embeddings.map { |e| JSON::Any.new(e.map { |v| JSON::Any.new(v) }) }),
@@ -382,41 +288,12 @@ if openai_key = ENV["OPENAI_API_KEY"]?
       "total_tokens" => JSON::Any.new(result.total_tokens),
     })
   end
-  embed_svc.start
 
-  # TTS service
-  tts_openai = Arcana::AI::TTS::OpenAI.new(api_key: openai_key)
   tts_schema = JSON.parse(%({"type":"object","properties":{"text":{"type":"string","description":"Text to synthesize"},"voice":{"type":"string","description":"Voice: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse (default: alloy)"},"output_path":{"type":"string","description":"File path for output audio (required unless inline: true)"},"inline":{"type":"boolean","description":"If true, return audio as base64 in the response instead of writing to disk. Default false."},"format":{"type":"string","description":"Audio format: mp3, wav, aac, flac, opus, pcm (default: opus)"},"instructions":{"type":"string","description":"Style/persona instructions"},"speed":{"type":"number","description":"Speed 0.25-4.0 (default: 1.0)"}},"required":["text"]}))
 
-  tts_svc = Arcana::Service.new(
-    bus: bus, directory: dir,
-    address: "openai:tts",
-    name: "OpenAI Text-to-Speech",
-    capability: "tts",
-    description: "Synthesize speech from text via OpenAI.",
-    schema: tts_schema,
-    guide: <<-GUIDE,
-    Send text and either an output path or inline: true to generate speech audio.
-
-    File example:   {"text": "Hello world", "output_path": "/tmp/hello.opus"}
-    Inline example: {"text": "Hello world", "inline": true}
-
-    Optional fields:
-      voice: alloy (default), nova, echo, etc.
-      format: opus (default), mp3, wav, aac, flac, pcm
-      instructions: "Speak warmly and clearly"
-      speed: 0.25-4.0
-
-    Returns (file mode):
-      {"output_path": "/tmp/hello.opus", "model": "...",
-       "content_type": "audio/opus", "content_length": N}
-
-    Returns (inline mode):
-      {"audio_base64": "...", "model": "...",
-       "content_type": "audio/opus", "content_length": N}
-    GUIDE
-    tags: ["tts", "speech", "audio", "openai"],
-  ) do |data|
+  openai_ts.tool("tts",
+    "Text-to-speech synthesis. Provide either output_path or inline: true.",
+    input_schema: tts_schema) do |data|
     inline = data.bool("inline")
     output_path = data.str?("output_path")
     raise "Provide either output_path or inline: true" if !inline && output_path.nil?
@@ -430,11 +307,8 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     )
 
     if inline
-      # TODO: promote to arcana-ai. Synthesize-to-temp-file then read+encode
-      # is a stopgap while Arcana::AI::TTS::Provider only exposes
-      # synthesize(request, output_path). Add synthesize_bytes(request) : Bytes
-      # to arcana-ai (0.2.x-ish) and replace this block with a direct
-      # base64 encode of the returned bytes — kills the disk round-trip.
+      # TODO: promote to arcana-ai (add synthesize_bytes on TTS::Provider)
+      # so this stops round-tripping through disk.
       temp = File.tempname("arcana-tts-", ".#{request.response_format}")
       begin
         result = tts_openai.synthesize(request, temp)
@@ -458,48 +332,28 @@ if openai_key = ENV["OPENAI_API_KEY"]?
       })
     end
   end
-  tts_svc.start
+
+  openai_ts.start
 end
 
 if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
   chat_anthropic = Arcana::AI::Chat::Anthropic.new(api_key: anthropic_key)
-  chat_anthropic_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: claude-sonnet-4-20250514)"},"temperature":{"type":"number","description":"Sampling temperature (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"web_search":{"type":"boolean","description":"If true, Claude can search the web during its response. Useful for fact lookup, finding URLs, or anything needing current information. The model decides when/whether to search. Default: false."}},"required":["messages"]}))
 
-  chat_anthropic_svc = Arcana::Service.new(
+  anthropic_ts = Arcana::Toolset.new(
     bus: bus, directory: dir,
-    address: "anthropic:chat",
-    name: "Anthropic Chat",
-    capability: "chat",
-    description: "Chat completion via Anthropic Messages API. Supports optional web search.",
-    schema: chat_anthropic_schema,
-    guide: <<-GUIDE,
-    Send a messages array to get a chat completion from Claude.
-
-    Example request:
-      {"messages": [{"role": "user", "content": "Hello!"}]}
-
-    Optional fields:
-      model: "claude-sonnet-4-20250514" (default), "claude-opus-4-20250514", etc.
-      temperature: 0.0-1.0 (default 0.7)
-      max_tokens: response limit (default 4096)
-      web_search: true to let Claude search the web during its response.
-                  The model decides when/whether to use it. Useful for
-                  fact lookup, finding canonical URLs, current events.
-                  Ask in the prompt for the response shape you want
-                  (e.g. "return only a JSON object with a 'url' field").
-
-    System messages are extracted and sent as top-level system parameter.
-
-    Returns: {"content": "...", "model": "...", "finish_reason": "...",
-              "prompt_tokens": N, "completion_tokens": N}
-    GUIDE
+    address: "anthropic",
+    name: "Anthropic",
+    description: "Anthropic provider — Claude chat completion. Supports optional web search.",
     tags: ["chat", "llm", "anthropic", "claude", "web"],
-  ) do |data|
+  )
+
+  chat_anthropic_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: claude-sonnet-4-20250514)"},"temperature":{"type":"number","description":"Sampling temperature (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"web_search":{"type":"boolean","description":"If true, Claude can search the web during its response. The model decides when/whether. Default: false."}},"required":["messages"]}))
+
+  anthropic_ts.tool("chat",
+    "Chat completion via Claude. Optional web_search:true lets the model browse.",
+    input_schema: chat_anthropic_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
-      Arcana::AI::Chat::Message.new(
-        role: m["role"].as_s,
-        content: m.str?("content"),
-      )
+      Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
     end
     server_tools = nil
     if data.bool?("web_search")
@@ -521,43 +375,28 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
       "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
     })
   end
-  chat_anthropic_svc.start
+
+  anthropic_ts.start
 end
 
 if google_key = ENV["GOOGLE_API_KEY"]?
   chat_gemini = Arcana::AI::Chat::Gemini.new(api_key: google_key)
+
+  gemini_ts = Arcana::Toolset.new(
+    bus: bus, directory: dir,
+    address: "gemini",
+    name: "Gemini",
+    description: "Google Gemini provider — chat completion.",
+    tags: ["chat", "llm", "gemini", "google"],
+  )
+
   chat_gemini_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: gemini-2.5-flash)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"}},"required":["messages"]}))
 
-  chat_gemini_svc = Arcana::Service.new(
-    bus: bus, directory: dir,
-    address: "gemini:chat",
-    name: "Gemini Chat",
-    capability: "chat",
-    description: "Chat completion via Google Gemini API.",
-    schema: chat_gemini_schema,
-    guide: <<-GUIDE,
-    Send a messages array to get a chat completion from Gemini.
-
-    Example request:
-      {"messages": [{"role": "user", "content": "Hello!"}]}
-
-    Optional fields:
-      model: "gemini-2.5-flash" (default), "gemini-2.5-pro", etc.
-      temperature: 0.0-2.0 (default 0.7)
-      max_tokens: response limit (default 4096)
-
-    System messages are extracted and sent as systemInstruction.
-
-    Returns: {"content": "...", "model": "...", "finish_reason": "...",
-              "prompt_tokens": N, "completion_tokens": N}
-    GUIDE
-    tags: ["chat", "llm", "gemini", "google"],
-  ) do |data|
+  gemini_ts.tool("chat",
+    "Chat completion via Gemini. System messages become systemInstruction.",
+    input_schema: chat_gemini_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
-      Arcana::AI::Chat::Message.new(
-        role: m["role"].as_s,
-        content: m.str?("content"),
-      )
+      Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
     end
     request = Arcana::AI::Chat::Request.new(
       messages: msgs,
@@ -574,39 +413,26 @@ if google_key = ENV["GOOGLE_API_KEY"]?
       "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
     })
   end
-  chat_gemini_svc.start
+
+  gemini_ts.start
 end
 
 if runware_key = ENV["RUNWARE_API_KEY"]?
   image_runware = Arcana::AI::Image::Runware.new(api_key: runware_key)
+
+  runware_ts = Arcana::Toolset.new(
+    bus: bus, directory: dir,
+    address: "runware",
+    name: "Runware",
+    description: "Runware provider — image generation with FLUX models.",
+    tags: ["image", "runware", "flux", "generation"],
+  )
+
   image_schema = JSON.parse(%({"type":"object","properties":{"prompt":{"type":"string","description":"Image description"},"output_path":{"type":"string","description":"File path for output image"},"width":{"type":"integer","description":"Width in pixels (default: 1024, auto-snapped to FLUX sizes)"},"height":{"type":"integer","description":"Height in pixels (default: 1024)"},"format":{"type":"string","description":"Output format: WEBP (default), PNG"},"enhance_prompt":{"type":"boolean","description":"Let provider rewrite prompt (default: false)"}},"required":["prompt","output_path"]}))
 
-  image_svc = Arcana::Service.new(
-    bus: bus, directory: dir,
-    address: "runware:image",
-    name: "Runware Image Generator",
-    capability: "image",
-    description: "Generate images using FLUX models via Runware.",
-    schema: image_schema,
-    guide: <<-GUIDE,
-    Send a prompt and output path to generate an image.
-
-    Example: {"prompt": "a crystal shard glowing", "output_path": "/tmp/shard.webp"}
-
-    Optional fields:
-      width/height: default 1024x1024, auto-snapped to FLUX-compatible sizes
-      format: WEBP (default) or PNG
-      enhance_prompt: true to let the model rewrite your prompt
-
-    Returns: {"output_path": "/tmp/shard.webp", "model": "...", "cost": 0.003}
-
-    Tips:
-    - Short, descriptive prompts work best
-    - Dimensions are automatically adjusted to valid FLUX aspect ratios
-    - Cost per generation is reported in the response
-    GUIDE
-    tags: ["image", "runware", "flux", "generation"],
-  ) do |data|
+  runware_ts.tool("image",
+    "Generate an image from a prompt via FLUX. Dimensions auto-snapped to FLUX aspect ratios.",
+    input_schema: image_schema) do |data|
     request = Arcana::AI::Image::Request.new(
       prompt: data["prompt"].as_s,
       width: data.int("width", 1024),
@@ -624,7 +450,8 @@ if runware_key = ENV["RUNWARE_API_KEY"]?
     end
     JSON::Any.new(h)
   end
-  image_svc.start
+
+  runware_ts.start
 end
 
 # -- ChatAgents (autonomous LLM-backed agents) --
