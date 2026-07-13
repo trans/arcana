@@ -1,3 +1,23 @@
+arcana (0.22.2-1) unstable; urgency=medium
+
+  * Three scale/robustness wins from the doc/PROTOCOL.md audit.
+  * Bounded mailboxes (via arcana-core 0.9.1). Every mailbox
+    defaults to `ARCANA_MAILBOX_MAX_QUEUE` (default 10000) messages.
+    Deliveries beyond that raise MailboxFull; the sender's send()
+    re-raises, /deliver returns an error, event log records
+    `message.rejected` with reason `mailbox_full`. Set the env var
+    to 0 to disable and go unbounded.
+  * Non-blocking prune (via arcana-core 0.9.1). Directory prune no
+    longer holds its mutex through both the walk AND the deletes —
+    register/lookup can slip through during a large sweep.
+  * arcana-mcp keep-alive HTTP. The MCP bridge now uses one
+    persistent HTTP::Client instance instead of tearing down and
+    rebuilding a TCP connection per REST call. Shaves the TCP
+    handshake off every MCP tool call.
+  * Depends on arcana-core ~> 0.9.1.
+
+ -- trans <transfire@gmail.com>  Sun, 12 Jul 2026 22:00:00 +0000
+
 arcana (0.22.1-1) unstable; urgency=medium
 
   * WebSocketHandler's `join` frame parser reads `kind`, `capability`,

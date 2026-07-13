@@ -1,5 +1,6 @@
 require "json"
 require "http/client"
+require "uri"
 
 module Arcana
   # MCP (Model Context Protocol) bridge to a running Arcana server.
@@ -165,6 +166,9 @@ module Arcana
     ]
 
     def initialize(@base_url : String = "http://127.0.0.1:19118", @api_key : String? = nil)
+      uri = URI.parse(@base_url)
+      @http = HTTP::Client.new(uri)  # persistent keep-alive connection
+      @http_mutex = Mutex.new         # HTTP::Client is not fiber-safe for concurrent use
     end
 
     # Run the MCP stdio loop. Blocks.
@@ -540,14 +544,14 @@ module Arcana
     end
 
     private def http_get(path : String) : String
-      response = HTTP::Client.get("#{@base_url}#{path}", headers: auth_headers)
+      response = @http_mutex.synchronize { @http.get(path, headers: auth_headers) }
       response.body
     end
 
     private def http_post(path : String, body : String) : String
       headers = auth_headers
       headers["Content-Type"] = "application/json"
-      response = HTTP::Client.post("#{@base_url}#{path}", headers: headers, body: body)
+      response = @http_mutex.synchronize { @http.post(path, headers: headers, body: body) }
       response.body
     end
 

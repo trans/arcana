@@ -94,6 +94,16 @@ bus.directory = dir
 bus.events = events_backend
 dir.events = events_backend
 
+# Bounded mailboxes: cap each mailbox's queue length to stop a runaway
+# sender from filling memory. Set to 0 (or unset via `unset ...`) to
+# disable and go unbounded like pre-0.22.2.
+if raw = ENV["ARCANA_MAILBOX_MAX_QUEUE"]?
+  max_q = raw.to_i
+  bus.default_max_queue = max_q if max_q > 0
+else
+  bus.default_max_queue = 10_000
+end
+
 # -- Register Arcana itself --
 
 arcana_guide = <<-GUIDE

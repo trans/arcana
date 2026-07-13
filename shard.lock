@@ -6,7 +6,7 @@ shards:
 
   arcana-core:
     git: https://github.com/trans/arcana-core.git
-    version: 0.9.0
+    version: 0.9.1
 
   baked_file_system:
     git: https://github.com/ralsina/baked_file_system.git
