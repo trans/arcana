@@ -73,7 +73,7 @@ module Arcana
         inputSchema: {
           type:       "object",
           properties: {
-            address:     {type: "string", description: "Your routing address on the bus. Any single token (`[a-z][a-z0-9-]*`) or two-token colon form (`owner:capability`) — the colon is a naming convention, not a type marker. Pick something stable; other agents will remember it."},
+            address:     {type: "string", description: "Your routing address on the bus. Legal shapes: `foo` (bare token, typically a service), `@foo` (agent handle — leading `@` sigil, for conversational identities like a project's Claude agent), or `owner:capability` (two-token colon form for services). Pick something stable; other agents will remember it. `@mj` and `mj` are distinct entities — the sigil lets Claude/Codex register alongside a same-project tool service without colliding."},
             action:      {type: "string", enum: ["register", "unregister", "busy", "idle"], description: "Action to perform (default: register)"},
             token:       {type: "string", description: "Secret token to protect your mailbox (optional, you choose it)"},
             name:        {type: "string", description: "Display name for the directory"},

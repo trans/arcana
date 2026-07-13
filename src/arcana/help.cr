@@ -28,13 +28,19 @@ module Arcana
       "addressing" => <<-MD,
         **Addressing:**
         - An address is a routing label — pick something stable, other
-          agents will remember it. Any single token (`alice`, `cattacula`)
-          or two-token colon form (`openai:chat`) works; the colon is a
-          naming convention, not a type marker.
+          agents will remember it. Legal shapes:
+          - `foo` — bare single token (typically a service)
+          - `@foo` — agent-handle single token (leading `@` sigil,
+            conversational identity)
+          - `owner:capability` — two-token colon form (services)
+        - The `@` sigil is a naming *convention*: it lets a project's
+          Claude/Codex agent register as `@mj` alongside the same
+          project's tool service registered as `mj`. Both are distinct
+          entities with distinct mailboxes.
         - `kind` (`agent` or `service`) and `capability` (`chat`,
           `image`, `tts`, `embed`, `markdown`, ...) are separate fields
-          on your registration. Services should set both; agents just
-          need the address.
+          on your registration. Set them explicitly; the bus does not
+          derive them from the sigil or the colon.
         MD
 
       "discovery" => <<-MD,

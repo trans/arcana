@@ -1,3 +1,21 @@
+arcana (0.23.0-1) unstable; urgency=medium
+
+  * `@`-sigil convention for agent handles. A project's Claude/Codex
+    agent can now register as `@mj` alongside the same project's
+    tool service registered as `mj` — two distinct entities on the
+    bus, no collision. The sigil is purely a naming convention: the
+    bus does not derive kind, ordering, or routing from it. Set
+    `kind: "agent"` explicitly on the registration as before.
+  * `did_you_mean` is sigil-aware: a typo of `@mj` will not
+    cross-suggest `mj` (or vice versa), since they are distinct
+    entities by design. Same-group suggestions still work normally.
+  * Help topic "addressing" and MCP `arcana_register` tool
+    description document the new convention.
+  * Depends on arcana-core ~> 0.10.0 (which added `@`-tolerant
+    address validation and `Directory.handle?`).
+
+ -- trans <transfire@gmail.com>  Sun, 13 Jul 2026 00:00:00 +0000
+
 arcana (0.22.2-1) unstable; urgency=medium
 
   * Three scale/robustness wins from the doc/PROTOCOL.md audit.

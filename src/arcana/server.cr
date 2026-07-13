@@ -431,6 +431,13 @@ module Arcana
       listings = @directory.list
       return nil if listings.empty?
 
+      # Sigil-aware: `@mj` and `mj` are distinct entities on purpose,
+      # so a typo of `@mj` shouldn't cross-suggest `mj` (or vice versa).
+      # Filter candidates to the same sigil group as the failed address.
+      failed_is_handle = Directory.handle?(addr)
+      listings = listings.select { |l| Directory.handle?(l.address) == failed_is_handle }
+      return nil if listings.empty?
+
       best : Directory::Listing? = nil
       best_score = 0.0_f64
       listings.each do |listing|

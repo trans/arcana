@@ -422,6 +422,46 @@ describe Arcana::Server do
         server.stop
       end
     end
+
+    it "does not cross-suggest across the @ sigil boundary" do
+      # A typo of `@mj` should not suggest `mj` (a distinct entity by
+      # design), and vice versa. Same-group suggestions still work.
+      bus = Arcana::Bus.new
+      dir = Arcana::Directory.new
+      dir.register(Arcana::Directory::Listing.new(
+        address: "mj", name: "Minanime service", description: "tools",
+      ))
+      dir.register(Arcana::Directory::Listing.new(
+        address: "@mjk", name: "Minanime agent typo target", description: "handles",
+      ))
+      bus.mailbox("mj")
+      bus.mailbox("@mjk")
+      bus.mailbox("client")
+
+      server = Arcana::Server.new(bus, dir, port: 14505)
+      server.start_in_background
+      begin
+        headers = HTTP::Headers{"Content-Type" => "application/json"}
+
+        # @mj (miss) — best candidate in the @ group is @mjk. Should NOT
+        # suggest the non-handle `mj`.
+        body = {from: "client", to: "@mj", payload: nil}.to_json
+        resp = HTTP::Client.post("http://127.0.0.1:14505/send", headers: headers, body: body)
+        resp.status_code.should eq(404)
+        parsed = JSON.parse(resp.body)
+        parsed["did_you_mean"].as_h["address"].as_s.should eq("@mjk")
+
+        # mjj (miss) — best candidate in the non-handle group is `mj`.
+        # Should NOT suggest `@mjk`.
+        body2 = {from: "client", to: "mjj", payload: nil}.to_json
+        resp2 = HTTP::Client.post("http://127.0.0.1:14505/send", headers: headers, body: body2)
+        resp2.status_code.should eq(404)
+        parsed2 = JSON.parse(resp2.body)
+        parsed2["did_you_mean"].as_h["address"].as_s.should eq("mj")
+      ensure
+        server.stop
+      end
+    end
   end
 
   # Bearer-token auth specs require a real Postgres test database so
