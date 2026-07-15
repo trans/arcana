@@ -30,11 +30,10 @@ module Arcana
         inputSchema: {
           type:       "object",
           properties: {
-            query:      {type: "string", description: "Search query (matches name, description, tags)"},
-            tag:        {type: "string", description: "Filter by tag"},
-            kind:       {type: "string", enum: ["agent", "service"], description: "Filter by kind"},
-            capability: {type: "string", description: "Filter by capability field on the listing. Providers usually advertise via tags instead — try `tag: \"chat\"` to find every entity that offers a chat tool."},
-            address:    {type: "string", description: "Look up a specific address"},
+            query:   {type: "string", description: "Search query (matches name, description, tags)"},
+            tag:     {type: "string", description: "Filter by tag. Providers auto-tag their tool names, so `tag: \"chat\"` finds every entity that offers a chat tool."},
+            kind:    {type: "string", enum: ["agent", "service"], description: "Filter by kind"},
+            address: {type: "string", description: "Look up a specific address"},
           },
         },
       },
@@ -79,7 +78,6 @@ module Arcana
             name:        {type: "string", description: "Display name for the directory"},
             description: {type: "string", description: "What you do (for the directory)"},
             kind:        {type: "string", enum: ["agent", "service"], description: "What kind of listing this is. Default: agent. Set to 'service' if you handle requests via a fixed schema."},
-            capability:  {type: "string", description: "For services: the capability you provide (e.g. 'chat', 'image', 'tts', 'embed'). Ignored for agents."},
             guide:       {type: "string", description: "How-to guide for interacting with you"},
             tags:        {type: "array", items: {type: "string"}, description: "Tags for discovery"},
             listed:      {type: "boolean", description: "Whether to add a directory listing. Default true. Set false for pure consumers that send/subscribe but don't accept addressed messages — they get a mailbox but stay invisible to discovery."},
@@ -288,8 +286,6 @@ module Arcana
         http_get("/directory?q=#{URI.encode_path_segment(query)}")
       elsif tag = args.str?("tag")
         http_get("/directory?tag=#{URI.encode_path_segment(tag)}")
-      elsif capability = args.str?("capability")
-        http_get("/directory?capability=#{URI.encode_path_segment(capability)}")
       elsif kind = args.str?("kind")
         http_get("/directory?kind=#{kind}")
       else
@@ -351,7 +347,6 @@ module Arcana
           name:        args.str?("name"),
           description: args.str?("description"),
           kind:        args.str?("kind"),
-          capability:  args.str?("capability"),
           guide:       args.str?("guide"),
           tags:        args["tags"]?,
           listed:      args.bool?("listed"),

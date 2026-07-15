@@ -211,7 +211,7 @@ arcana_ts = Arcana::Toolset.new(
   address: "arcana",
   name: "Arcana",
   description: "Provider-agnostic AI communication library for Crystal. Arcana provides unified interfaces for chat, image, text-to-speech, and embeddings, plus an agent-to-agent communication bus with pub/sub, request/response, and OTP-style supervision.",
-  tags: ["utility", "test", "markdown", "arcana"],
+  tags: ["utility", "arcana"],
 )
 
 arcana_ts.tool("echo", "Echoes back whatever you send. Useful for testing bus connectivity.") do |data|
@@ -247,7 +247,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     address: "openai",
     name: "OpenAI",
     description: "OpenAI provider — chat completion, embeddings, text-to-speech.",
-    tags: ["chat", "embed", "tts", "llm", "openai"],
+    tags: ["llm", "openai"],
   )
 
   chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150)"}},"required":["messages"]}))
@@ -344,7 +344,7 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
     address: "anthropic",
     name: "Anthropic",
     description: "Anthropic provider — Claude chat completion. Supports optional web search.",
-    tags: ["chat", "llm", "anthropic", "claude", "web"],
+    tags: ["llm", "anthropic", "claude", "web"],
   )
 
   chat_anthropic_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: claude-sonnet-4-20250514)"},"temperature":{"type":"number","description":"Sampling temperature (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"web_search":{"type":"boolean","description":"If true, Claude can search the web during its response. The model decides when/whether. Default: false."}},"required":["messages"]}))
@@ -387,7 +387,7 @@ if google_key = ENV["GOOGLE_API_KEY"]?
     address: "gemini",
     name: "Gemini",
     description: "Google Gemini provider — chat completion.",
-    tags: ["chat", "llm", "gemini", "google"],
+    tags: ["llm", "gemini", "google"],
   )
 
   chat_gemini_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: gemini-2.5-flash)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"}},"required":["messages"]}))
@@ -425,7 +425,7 @@ if runware_key = ENV["RUNWARE_API_KEY"]?
     address: "runware",
     name: "Runware",
     description: "Runware provider — image generation with FLUX models.",
-    tags: ["image", "runware", "flux", "generation"],
+    tags: ["runware", "flux", "generation"],
   )
 
   image_schema = JSON.parse(%({"type":"object","properties":{"prompt":{"type":"string","description":"Image description"},"output_path":{"type":"string","description":"File path for output image"},"width":{"type":"integer","description":"Width in pixels (default: 1024, auto-snapped to FLUX sizes)"},"height":{"type":"integer","description":"Height in pixels (default: 1024)"},"format":{"type":"string","description":"Output format: WEBP (default), PNG"},"enhance_prompt":{"type":"boolean","description":"Let provider rewrite prompt (default: false)"}},"required":["prompt","output_path"]}))

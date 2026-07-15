@@ -1,3 +1,23 @@
+arcana (0.25.0-1) unstable; urgency=medium
+
+  * BREAKING: the `capability` field on Directory listings is gone.
+    - Server /directory no longer accepts `?capability=` filter.
+    - `arcana_register` MCP tool schema drops the `capability` param.
+    - `arcana_directory` MCP tool schema drops the `capability` param.
+    - Built-in Toolset registrations in bin/arcana.cr drop the
+      `capability:` field. Tags are now the discovery surface.
+  * Cross-provider discovery uses tags: `arcana_directory tag:"chat"`
+    finds every entity that offers a chat tool. Toolsets auto-tag
+    their registered tool names on start, so tool names are always
+    in the tag list without the user having to double-declare.
+  * Redundant tool-name tags trimmed from built-in Toolsets (chat,
+    tts, embed, image, markdown, echo appear automatically from
+    the tool registrations now).
+  * Help topic addressing/discovery text updated.
+  * Depends on arcana-core ~> 0.11.0.
+
+ -- trans <transfire@gmail.com>  Tue, 15 Jul 2026 00:00:00 +0000
+
 arcana (0.24.0-1) unstable; urgency=medium
 
   * BREAKING: every default provider is now a Toolset. The

@@ -29,38 +29,39 @@ module Arcana
         **Addressing:**
         - An address is a routing label — pick something stable, other
           agents will remember it. Legal shapes:
-          - `foo` — bare single token (typically a service)
+          - `foo` — bare single token (typically a service or Toolset)
           - `@foo` — agent-handle single token (leading `@` sigil,
             conversational identity)
-          - `owner:capability` — two-token colon form (services)
+          - `owner:capability` — two-token colon form (legacy convention;
+            still valid, but Toolset is preferred for grouping tools
+            under one owner)
         - The `@` sigil is a naming *convention*: it lets a project's
           Claude/Codex agent register as `@mj` alongside the same
           project's tool service registered as `mj`. Both are distinct
           entities with distinct mailboxes.
-        - `kind` (`agent` or `service`) and `capability` (`chat`,
-          `image`, `tts`, `embed`, `markdown`, ...) are separate fields
-          on your registration. Set them explicitly; the bus does not
-          derive them from the sigil or the colon.
+        - `kind` (`agent` or `service`) is an explicit field on your
+          registration; the bus does not derive it from the sigil or
+          the colon.
         MD
 
       "discovery" => <<-MD,
         **Discovery:** two-step.
 
         Step 1 — list what's on the bus with `arcana_directory`. Filter
-        by `kind`, `tag`, or `capability`. Providers advertise their
-        offerings via `tags` — e.g. `arcana_directory tag:"chat"` finds
-        every entity that offers a chat tool (openai, anthropic, gemini,
-        ...). `arcana_directory kind:"agent"` lists humans/assistants.
-        Each listing has a short `guide` for at-a-glance context.
+        by `kind` or `tag`. Providers auto-tag their registered tool
+        names, so `arcana_directory tag:"chat"` finds every entity that
+        offers a chat tool (openai, anthropic, gemini, ...).
+        `arcana_directory kind:"agent"` lists humans/assistants. Each
+        listing has a short `guide` for at-a-glance context.
 
         Step 2 — ask any participant what it offers by sending
         `{"tool":"help"}`. The reply is a Protocol.result wrapping a
         manifest: `{"name":"...","description":"...","tools":[{"name":"...","description":"...","inputSchema":{...}}, ...]}`.
         Then invoke with `{"tool":"<name>", ...args}`.
 
-        Default built-in providers use this shape — `arcana` for
-        utilities (echo, markdown), `openai` for chat/embed/tts,
-        `anthropic` for chat, `gemini` for chat, `runware` for image.
+        Default built-in providers — `arcana` (echo, markdown), `openai`
+        (chat, embed, tts), `anthropic` (chat), `gemini` (chat),
+        `runware` (image).
         MD
 
       "errors" => <<-MD,

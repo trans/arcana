@@ -157,8 +157,6 @@ module Arcana
           ctx.response.print @directory.to_json(@directory.search(query))
         elsif tag = ctx.request.query_params["tag"]?
           ctx.response.print @directory.to_json(@directory.by_tag(tag))
-        elsif capability = ctx.request.query_params["capability"]?
-          ctx.response.print @directory.to_json(@directory.by_capability(capability))
         elsif kind = ctx.request.query_params["kind"]?
           k = kind == "agent" ? Directory::Kind::Agent : Directory::Kind::Service
           ctx.response.print @directory.to_json(@directory.by_kind(k))
@@ -263,7 +261,6 @@ module Arcana
           name: parsed.str?("name") || address,
           description: parsed.str("description"),
           kind: kind,
-          capability: parsed.str?("capability"),
           schema: parsed["schema"]?,
           guide: parsed.str?("guide"),
           tags: parsed.str_arr("tags"),
@@ -799,7 +796,6 @@ module Arcana
                   name: parsed.str?("name") || raw,
                   description: parsed.str("description"),
                   kind: kind,
-                  capability: parsed.str?("capability"),
                   guide: parsed.str?("guide"),
                   schema: parsed["schema"]?,
                   tags: parsed.str_arr("tags"),
