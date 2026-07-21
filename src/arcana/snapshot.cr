@@ -26,6 +26,15 @@ module Arcana
     end
 
     private def self.build_json(bus : Bus, directory : Directory, server : Server) : String
+      # Ephemeral listings are code-registered (Service.new / Toolset.new)
+      # — the code re-registers them on every startup with fresh
+      # metadata, so persisting them just accumulates ghosts across
+      # daemon versions. Filter them (and their mailboxes) out at save
+      # time. User-registered listings (WS join, POST /register) are
+      # persistent by default.
+      ephemeral_addrs = Set(String).new
+      directory.list.each { |l| ephemeral_addrs << l.address if l.ephemeral }
+
       JSON.build do |j|
         j.object do
           j.field "version", VERSION
@@ -33,6 +42,7 @@ module Arcana
           j.field "listings" do
             j.array do
               directory.list.each do |l|
+                next if l.ephemeral
                 j.object do
                   j.field "address", l.address
                   j.field "name", l.name
@@ -52,6 +62,7 @@ module Arcana
             j.array do
               bus.addresses.each do |addr|
                 next if addr.starts_with?("_reply:") # skip transient reply mailboxes
+                next if ephemeral_addrs.includes?(addr) # skip code-owned mailboxes
                 mb = bus.mailbox(addr)
                 snap = mb.dump
                 next if snap[:messages].empty? && snap[:frozen].empty?

@@ -1,3 +1,25 @@
+arcana (0.26.0-1) unstable; urgency=medium
+
+  * Snapshot no longer persists code-registered listings (or their
+    mailboxes). Root cause of the "zombie listing" bug: a pre-
+    consolidation snapshot restored old service addresses that the
+    current code doesn't create anymore, leaving mailboxes without
+    workers and every send silently timing out.
+  * Requires arcana-core 0.12.0 which added `Listing.ephemeral` and
+    marks Service.new / Toolset.new registrations with it. The daemon
+    now filters ephemeral listings from `Snapshot.save`. Startup order
+    stays: (1) code re-registers Toolsets fresh; (2) snapshot restores
+    user-registered listings. Ghosts can't reappear.
+  * ONE-TIME migration: existing state.json files contain unmarked
+    listings (from before the ephemeral flag existed). If you were
+    running the daemon on 0.24.0+ with a pre-0.24 snapshot, those
+    ghost listings are still in state.json. `sudo rm
+    /var/lib/arcana/state.json && sudo systemctl restart arcana`
+    clears them once; from then on the fix prevents re-accumulation.
+  * Depends on arcana-core ~> 0.12.0.
+
+ -- trans <transfire@gmail.com>  Tue, 15 Jul 2026 12:00:00 +0000
+
 arcana (0.25.0-1) unstable; urgency=medium
 
   * BREAKING: the `capability` field on Directory listings is gone.
