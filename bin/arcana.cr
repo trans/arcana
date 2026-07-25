@@ -104,6 +104,15 @@ else
   bus.default_max_queue = 10_000
 end
 
+# System-topic firehose: when enabled, every successful send fans a
+# metadata copy to `sys.message.sent` for subscribers. AIX's tmux
+# bridge uses this to get push wake notifications without polling
+# GET /events. Default OFF — enable with ARCANA_SYSTEM_TOPICS=1.
+# Payload: {recipient, sender, ordering, correlation_id, subject,
+# timestamp}. Subscribe your address to `sys.message.sent` and
+# long-poll /receive on your mailbox.
+bus.system_topics = ENV["ARCANA_SYSTEM_TOPICS"]? == "1"
+
 # -- Register Arcana itself --
 
 arcana_guide = <<-GUIDE

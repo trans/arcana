@@ -1,3 +1,22 @@
+arcana (0.27.0-1) unstable; urgency=medium
+
+  * New `ARCANA_SYSTEM_TOPICS=1` env var enables the
+    `sys.message.sent` firehose (via arcana-core 0.13.0). When on,
+    every successful send fans a metadata copy to the
+    `sys.message.sent` topic so subscribers can get push wake
+    notifications without polling GET /events. AIX (@aix) is the
+    concrete motivator — the tmux bridge subscribes and injects
+    wake keystrokes into agent panes on activity.
+  * Default OFF — deployments that don't want per-message fanout
+    stay quiet.
+  * Payload per event: {recipient, sender, ordering, correlation_id,
+    subject, timestamp}. Subscribe your address to
+    `sys.message.sent` and long-poll `/receive` on your own
+    mailbox to consume.
+  * Depends on arcana-core ~> 0.13.0.
+
+ -- trans <transfire@gmail.com>  Fri, 24 Jul 2026 00:00:00 +0000
+
 arcana (0.26.0-1) unstable; urgency=medium
 
   * Snapshot no longer persists code-registered listings (or their
