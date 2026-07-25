@@ -30,7 +30,12 @@ module Arcana
       tokens.each { |addr, tok| @tokens[addr] = tok }
     end
 
-    property state_file : String?
+    # Callback invoked after every state-changing REST op (/register,
+    # /unregister). The daemon wires this to `Snapshot.save` so state
+    # is persisted through the same path as graceful-shutdown saves —
+    # which respects the ephemeral flag and doesn't accumulate
+    # code-registered zombies across restarts.
+    property state_saver : Proc(Nil)? = nil
 
     # Optional event recorder for auth failures and server lifecycle.
     property events : Events::Backend?
@@ -46,7 +51,6 @@ module Arcana
       @directory : Directory,
       @host : String = "0.0.0.0",
       @port : Int32 = 19118,
-      @state_file : String? = nil,
     )
     end
 
@@ -82,9 +86,7 @@ module Arcana
     end
 
     private def save_state
-      if path = @state_file
-        @directory.save(path)
-      end
+      @state_saver.try &.call
     end
 
     private def check_token!(address : String, parsed : JSON::Any)

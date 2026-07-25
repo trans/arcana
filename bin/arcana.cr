@@ -50,7 +50,7 @@ fresh = ARGV.includes?("--fresh")
 host = ENV["ARCANA_HOST"]? || "127.0.0.1"
 port = (ENV["ARCANA_PORT"]? || "19118").to_i
 state_dir = ENV["ARCANA_STATE_DIR"]? || File.join(Path.home, ".arcana")
-state_file = File.join(state_dir, "directory.json")
+legacy_state_file = File.join(state_dir, "directory.json") # pre-0.28 dual-file layout
 
 Dir.mkdir_p(state_dir) unless Dir.exists?(state_dir)
 
@@ -555,8 +555,22 @@ end
 
 snapshot_file = File.join(state_dir, "state.json")
 state_backend = Arcana::LocalFileBackend.new(snapshot_file)
-server = Arcana::Server.new(bus, dir, host: host, port: port, state_file: state_file)
+server = Arcana::Server.new(bus, dir, host: host, port: port)
 server.events = events_backend
+
+# Route every state-changing REST op (/register, /unregister) through
+# the same snapshot path used by graceful shutdown. This eliminates the
+# pre-0.28 dual-file layout (directory.json + state.json) that caused
+# code-registered listings to accumulate as zombies across restarts —
+# the old Directory#save path ignored the ephemeral flag.
+server.state_saver = ->{
+  begin
+    Arcana::Snapshot.save(bus, dir, server, state_backend)
+  rescue ex
+    STDERR.puts "Snapshot save failed: #{ex.message}"
+  end
+  nil
+}
 
 # -- Bearer-token auth (opt-in) --
 #
@@ -579,12 +593,17 @@ unless fresh
   if Arcana::Snapshot.load(bus, dir, server, state_backend)
     restored = dir.list.size
     bus.addresses.each { |a| restored_messages += bus.pending(a) }
-  elsif File.exists?(state_file)
-    # Legacy migration: import old directory.json
-    restored = dir.load(state_file)
+  elsif File.exists?(legacy_state_file)
+    # Legacy migration: import pre-0.28 directory.json ONCE, then
+    # rename it out of the way so it doesn't reload on next startup.
+    # Newer state persistence goes entirely through Snapshot (state.json),
+    # which respects the ephemeral flag and stops zombie-listing drift.
+    STDERR.puts "Legacy directory.json found at #{legacy_state_file} — importing once, then archiving."
+    restored = dir.load(legacy_state_file)
     dir.list.each do |listing|
       bus.mailbox(listing.address) unless bus.has_mailbox?(listing.address)
     end
+    File.rename(legacy_state_file, "#{legacy_state_file}.pre-0.28.bak") rescue nil
   end
 end
 

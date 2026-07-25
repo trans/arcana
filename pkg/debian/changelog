@@ -1,3 +1,29 @@
+arcana (0.28.0-1) unstable; urgency=medium
+
+  * BUGFIX (severity: this is why 0.26's ephemeral-listing fix looked
+    like it did nothing): the daemon had TWO parallel persistence
+    paths for directory listings, and only one had the ephemeral
+    filter. `Snapshot.save` (state.json) filtered ephemeral listings
+    as intended. `Directory#save` (directory.json), triggered on every
+    /register + /unregister via `Server#save_state`, wrote everything
+    unconditionally. Code-registered Toolsets kept getting re-cemented
+    as non-ephemeral through the directory.json path on every client
+    registration — invisible to anyone testing only the snapshot side.
+  * Server no longer takes a `state_file:` constructor param.
+    New `Server#state_saver : Proc(Nil)?` property is a callback
+    invoked from /register + /unregister. bin/arcana.cr wires it to
+    `Snapshot.save` so every state-changing REST op flows through the
+    single, ephemeral-aware persistence path.
+  * One-time legacy migration: if a `directory.json` file is present
+    at startup, it's imported once into memory (via the same
+    Directory#load path), and then renamed to
+    `directory.json.pre-0.28.bak` so it doesn't reload on subsequent
+    startups. Delete the .bak whenever you're comfortable.
+  * `Directory#save/load` remain in arcana-core for standalone /
+    testing use — the daemon just doesn't call them anymore.
+
+ -- trans <transfire@gmail.com>  Fri, 25 Jul 2026 17:00:00 +0000
+
 arcana (0.27.0-1) unstable; urgency=medium
 
   * New `ARCANA_SYSTEM_TOPICS=1` env var enables the
