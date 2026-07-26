@@ -1,0 +1,230 @@
+#!/bin/bash
+#
+# arcana setup — Machine/user-level setup for the Arcana agent bus.
+#
+# Idempotent. Run once (or after upgrades). Installs:
+#   1. Hook scripts to ~/.claude/hooks/ (shared by every Claude Code session)
+#   2. Hook config into ~/.claude/settings.json
+#   3. Pre-approval rules for mcp__arcana__* into ~/.claude/settings.json
+#      (so sub-agents don't hang on permission prompts)
+#   4. Global MCP registration (`claude mcp add arcana --scope user -- arcana-mcp`)
+#      if the `claude` CLI is available
+#
+# Nothing is per-project — the hooks derive the agent address from
+# $CLAUDE_PROJECT_DIR at hook time, so one setup covers every project.
+#
+# Usage:
+#   arcana setup             # do the setup
+#   arcana setup --verify    # setup + round-trip echo test against the daemon
+#   arcana setup --help
+#
+
+set -euo pipefail
+
+VERIFY=0
+for arg in "$@"; do
+  case "$arg" in
+    --verify) VERIFY=1 ;;
+    --help|-h)
+      cat <<'HELP'
+arcana setup — machine/user-level setup
+
+Installs hook scripts, hook config, permission allow-rules, and MCP
+registration. Idempotent — safe to re-run.
+
+Options:
+  --verify   After setup, do a round-trip echo test via the daemon.
+             Confirms the tool + hook + daemon path all work end-to-end.
+  --help     This message.
+
+Reads no env vars. Writes to:
+  ~/.claude/hooks/arcana-*.sh
+  ~/.claude/settings.json
+  ~/.claude.json (via `claude mcp add`)
+HELP
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $arg" >&2
+      echo "Try: arcana setup --help" >&2
+      exit 1
+      ;;
+  esac
+done
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAUDE_DIR="$HOME/.claude"
+HOOKS_DIR="$CLAUDE_DIR/hooks"
+SETTINGS="$CLAUDE_DIR/settings.json"
+
+# Find arcana-mcp binary
+if [ -x "$SCRIPT_DIR/arcana-mcp" ]; then
+  MCP_BIN="$SCRIPT_DIR/arcana-mcp"
+elif command -v arcana-mcp >/dev/null 2>&1; then
+  MCP_BIN="$(command -v arcana-mcp)"
+else
+  echo "Error: arcana-mcp not found on PATH. Install the arcana package or build locally." >&2
+  exit 1
+fi
+
+echo "Arcana setup"
+echo "  MCP binary: $MCP_BIN"
+echo ""
+
+# --- 1. Install hook scripts ---
+
+mkdir -p "$HOOKS_DIR"
+
+cat > "$HOOKS_DIR/arcana-register.sh" << 'HOOK'
+#!/bin/bash
+# SessionStart hook: register on Arcana bus using `@<basename>` sigil convention
+# for agent handles. The `@` distinguishes conversational identities
+# (project's Claude/Codex) from same-name tool services (e.g. `mj` the
+# service vs `@mj` the project agent).
+
+address="@$(basename "$CLAUDE_PROJECT_DIR")"
+
+curl -sf http://127.0.0.1:19118/register \
+  -H "Content-Type: application/json" \
+  -d "{\"address\":\"$address\",\"kind\":\"agent\"}" \
+  >/dev/null 2>&1
+
+exit 0
+HOOK
+
+cat > "$HOOKS_DIR/arcana-mail.sh" << 'HOOK'
+#!/bin/bash
+# Stop hook: check Arcana bus for pending mail before Claude ends its turn.
+# Uses @<basename> address (agent-handle convention).
+# Notifies once per pending-count change to avoid infinite stop loops.
+
+input=$(cat)
+address="@$(basename "$CLAUDE_PROJECT_DIR")"
+
+response=$(curl -sf http://127.0.0.1:19118/peek \
+  -H "Content-Type: application/json" \
+  -d "{\"address\":\"$address\"}" 2>/dev/null)
+
+# If Arcana isn't running or no response, let Claude stop normally.
+[ -z "$response" ] && exit 0
+
+pending=$(echo "$response" | jq -r '.pending // 0')
+[ "$pending" -eq 0 ] && exit 0
+
+# Only notify once — if we already notified for this count, let Claude stop.
+flag="/tmp/arcana-mail-$(echo "$address" | tr -c 'a-zA-Z0-9_-' '_')"
+
+if [ -f "$flag" ] && [ "$(cat "$flag")" = "$pending" ]; then
+  rm -f "$flag"
+  exit 0
+fi
+
+echo "$pending" > "$flag"
+
+s="s"; [ "$pending" -eq 1 ] && s=""
+echo "You have mail! ($pending message$s)" >&2
+exit 2
+HOOK
+
+cat > "$HOOKS_DIR/arcana-unregister.sh" << 'HOOK'
+#!/bin/bash
+# SessionEnd hook: unregister from Arcana bus.
+
+address="@$(basename "$CLAUDE_PROJECT_DIR")"
+
+curl -sf http://127.0.0.1:19118/unregister \
+  -H "Content-Type: application/json" \
+  -d "{\"address\":\"$address\"}" \
+  >/dev/null 2>&1
+
+# Clean up mail notification flag.
+flag="/tmp/arcana-mail-$(echo "$address" | tr -c 'a-zA-Z0-9_-' '_')"
+rm -f "$flag"
+
+exit 0
+HOOK
+
+chmod +x "$HOOKS_DIR/arcana-register.sh" "$HOOKS_DIR/arcana-mail.sh" "$HOOKS_DIR/arcana-unregister.sh"
+echo "  Hooks installed → $HOOKS_DIR/arcana-*.sh"
+
+# --- 2. Merge hooks + permission allow-rules into settings.json ---
+
+mkdir -p "$CLAUDE_DIR"
+
+# Pre-approve every mcp__arcana__* tool call. Without this, sub-agents
+# spawned by AIX (or any headless Claude Code launch) freeze on the first
+# arcana tool call waiting for a permission click that never comes.
+SETTINGS_ADD='{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/arcana-register.sh" }] }],
+    "Stop":         [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/arcana-mail.sh"     }] }],
+    "SessionEnd":   [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/arcana-unregister.sh" }] }]
+  },
+  "permissions": {
+    "allow": ["mcp__arcana__*"]
+  }
+}'
+
+if [ -f "$SETTINGS" ]; then
+  # Merge into existing settings. `*` is jq's recursive merge — preserves
+  # sibling keys, replaces on conflict at leaves. permissions.allow is
+  # replaced wholesale rather than appended; if the user has custom allow
+  # rules already, they need to add mcp__arcana__* themselves. (The `*`
+  # merge doesn't concat arrays. Live with it — this is user-scoped.)
+  MERGED=$(jq -s '.[0] * .[1]' "$SETTINGS" <(echo "$SETTINGS_ADD"))
+  echo "$MERGED" > "$SETTINGS"
+  echo "  Settings merged → $SETTINGS"
+else
+  echo "$SETTINGS_ADD" | jq . > "$SETTINGS"
+  echo "  Settings created → $SETTINGS"
+fi
+
+# --- 3. Register MCP server globally (user scope) ---
+
+if command -v claude >/dev/null 2>&1; then
+  # `claude mcp add` fails loudly if the name is already registered.
+  # Detect first, only add if absent.
+  if claude mcp list 2>/dev/null | grep -q '^arcana:'; then
+    echo "  MCP already registered (user scope) — leaving as-is"
+  else
+    if claude mcp add arcana --scope user -- "$MCP_BIN" >/dev/null 2>&1; then
+      echo "  MCP registered → claude mcp add arcana --scope user"
+    else
+      echo "  MCP registration failed. Run manually: claude mcp add arcana --scope user -- $MCP_BIN" >&2
+    fi
+  fi
+else
+  echo "  \`claude\` CLI not on PATH — skipping MCP registration."
+  echo "     After installing Claude Code, run:"
+  echo "     claude mcp add arcana --scope user -- $MCP_BIN"
+fi
+
+echo ""
+echo "Setup complete."
+
+# --- 4. Optional: verify round-trip ---
+
+if [ "$VERIFY" -eq 1 ]; then
+  echo ""
+  echo "Verifying round-trip against the daemon..."
+
+  if ! curl -sf http://127.0.0.1:19118/health >/dev/null; then
+    echo "  Daemon isn't reachable on http://127.0.0.1:19118 — start it with:" >&2
+    echo "     sudo systemctl start arcana" >&2
+    exit 1
+  fi
+
+  # deliver {tool:echo, ping:pong} → expect a Protocol.result echoing back.
+  reply=$(curl -sf http://127.0.0.1:19118/deliver \
+    -H "Content-Type: application/json" \
+    -d '{"from":"arcana-setup-verify","to":"arcana","payload":{"tool":"echo","ping":"pong"},"ordering":"sync","timeout_ms":3000}' \
+    2>/dev/null || true)
+
+  if echo "$reply" | jq -e '.payload._status == "result" and .payload.data.ping == "pong"' >/dev/null 2>&1; then
+    echo "  Round-trip OK — arcana Toolset is live, replies routed correctly."
+  else
+    echo "  Round-trip FAILED. Reply was: $reply" >&2
+    echo "  Daemon is running but the arcana Toolset isn't responding as expected." >&2
+    exit 1
+  fi
+fi

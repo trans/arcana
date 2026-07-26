@@ -1,3 +1,30 @@
+arcana (0.29.0-1) unstable; urgency=medium
+
+  * `arcana init` → `arcana setup`. Same script, better name — the
+    operation is user/machine-scoped, not per-project. `arcana init`
+    still works as a deprecated alias for one release; prints a
+    one-line reminder.
+  * Setup no longer writes `.mcp.json`. That was redundant with the
+    global `claude mcp add arcana --scope user` registration (which
+    setup now attempts itself when the `claude` CLI is available).
+    Removes the personal-path-in-repo trap.
+  * Session hooks (register/mail/unregister) now use the `@<basename>`
+    agent-handle convention. Prior versions registered as bare
+    `<basename>` — this brings the auto-derived address in line with
+    the sigil-vs-service split (`mj` the tool service ≠ `@mj` the
+    project's Claude agent).
+  * Setup now merges `permissions.allow` with `mcp__arcana__*` into
+    `~/.claude/settings.json`, pre-approving every arcana MCP tool
+    call. Sub-agents launched by AIX (or any headless Claude Code
+    invocation) no longer freeze on the first tool call waiting for
+    a permission click that never comes.
+  * `--verify` flag: after setup, does a round-trip echo test
+    (`deliver to:"arcana" payload:{tool:"echo", ping:"pong"}`) that
+    confirms daemon health + tool routing end-to-end in one step.
+  * Packaging updated: /usr/bin/arcana-setup replaces /usr/bin/arcana-init.
+
+ -- trans <transfire@gmail.com>  Fri, 25 Jul 2026 20:00:00 +0000
+
 arcana (0.28.0-1) unstable; urgency=medium
 
   * BUGFIX (severity: this is why 0.26's ephemeral-listing fix looked

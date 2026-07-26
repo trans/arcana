@@ -5,11 +5,16 @@ require "../src/arcana"
 command = ARGV.shift? || "serve"
 
 case command
-when "init"
-  # Delegate to the init script
-  script = File.join(File.dirname(Process.executable_path || __FILE__), "arcana-init")
+when "setup", "init"
+  # Delegate to the setup script. `init` is a deprecated alias for
+  # `setup` — the operation is user/machine-scoped, not per-project,
+  # so `setup` reflects it better. Keep `init` for one release.
+  if command == "init"
+    STDERR.puts "Note: `arcana init` is deprecated; use `arcana setup`. Same command."
+  end
+  script = File.join(File.dirname(Process.executable_path || __FILE__), "arcana-setup")
   unless File.exists?(script)
-    script = File.join(File.dirname(__DIR__), "bin", "arcana-init")
+    script = File.join(File.dirname(__DIR__), "bin", "arcana-setup")
   end
   exit Process.run(script, ARGV, output: STDOUT, error: STDERR).exit_code
 when "version", "--version", "-v"
@@ -23,7 +28,7 @@ when "help", "--help", "-h"
 
   Commands:
     serve   Start the Arcana server (default)
-    init    Set up a project for the bus
+    setup   User/machine setup — install hooks + allow-rules + MCP registration
     version Show version
 
   Options:
