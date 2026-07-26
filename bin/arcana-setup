@@ -215,16 +215,24 @@ if [ "$VERIFY" -eq 1 ]; then
   fi
 
   # deliver {tool:echo, ping:pong} → expect a Protocol.result echoing back.
-  reply=$(curl -sf http://127.0.0.1:19118/deliver \
+  # from="" skips the check_sender! check (the verify probe isn't a
+  # registered participant on the bus, and doesn't need to be for a
+  # one-shot sync round-trip — server assigns an ephemeral reply mailbox).
+  http_status=0
+  reply=$(curl -s -o /tmp/arcana-verify.$$ -w "%{http_code}" \
+    http://127.0.0.1:19118/deliver \
     -H "Content-Type: application/json" \
-    -d '{"from":"arcana-setup-verify","to":"arcana","payload":{"tool":"echo","ping":"pong"},"ordering":"sync","timeout_ms":3000}' \
-    2>/dev/null || true)
+    -d '{"from":"","to":"arcana","payload":{"tool":"echo","ping":"pong"},"ordering":"sync","timeout_ms":3000}' \
+    2>/dev/null) && http_status=$reply
+  body=$(cat /tmp/arcana-verify.$$ 2>/dev/null || echo "")
+  rm -f /tmp/arcana-verify.$$
 
-  if echo "$reply" | jq -e '.payload._status == "result" and .payload.data.ping == "pong"' >/dev/null 2>&1; then
+  if [ "$http_status" = "200" ] && echo "$body" | jq -e '.payload._status == "result" and .payload.data.ping == "pong"' >/dev/null 2>&1; then
     echo "  Round-trip OK — arcana Toolset is live, replies routed correctly."
   else
-    echo "  Round-trip FAILED. Reply was: $reply" >&2
-    echo "  Daemon is running but the arcana Toolset isn't responding as expected." >&2
+    echo "  Round-trip FAILED." >&2
+    echo "    HTTP status: $http_status" >&2
+    echo "    Body:        $body" >&2
     exit 1
   fi
 fi

@@ -1,3 +1,15 @@
+arcana (0.29.1-1) unstable; urgency=medium
+
+  * `arcana setup --verify` was using `from: "arcana-setup-verify"`
+    (an unregistered sender) which the daemon rejected via its
+    check_sender! guard, and then `curl -sf` swallowed the error
+    silently. Verify now uses an empty `from` (allowed for
+    one-shot sync round-trips — the server assigns an ephemeral
+    reply mailbox anyway) and prints HTTP status + body on failure
+    so the actual error is visible.
+
+ -- trans <transfire@gmail.com>  Sat, 26 Jul 2026 00:00:00 +0000
+
 arcana (0.29.0-1) unstable; urgency=medium
 
   * `arcana init` → `arcana setup`. Same script, better name — the
