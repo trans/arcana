@@ -26,11 +26,11 @@ describe Arcana::Supervisor do
     dir = Arcana::Directory.new
 
     sup = Arcana::Supervisor.new(bus, dir)
-    actor = EchoActor.new(bus, dir, "sup-echo", "Echo", "Echo")
+    actor = EchoActor.new(bus, dir, "@sup-echo", "Echo", "Echo")
     sup.supervise(actor)
 
-    sup.children.should eq(["sup-echo"])
-    dir.lookup("sup-echo").should_not be_nil
+    sup.children.should eq(["@sup-echo"])
+    dir.lookup("@sup-echo").should_not be_nil
   end
 
   it "restarts a crashed actor (one_for_one)" do
@@ -39,18 +39,18 @@ describe Arcana::Supervisor do
 
     sup = Arcana::Supervisor.new(bus, dir, strategy: Arcana::Supervisor::Strategy::OneForOne)
 
-    actor = CrashOnceActor.new(bus, dir, "crashy", "Crashy", "Crashes once")
+    actor = CrashOnceActor.new(bus, dir, "@crashy", "Crashy", "Crashes once")
     sup.supervise(actor)
 
     # Send message that triggers a crash
-    bus.send(Arcana::Envelope.new(from: "tester", to: "crashy",
+    bus.send(Arcana::Envelope.new(from: "@tester", to: "@crashy",
       payload: JSON::Any.new("trigger")))
 
     sleep 200.milliseconds
 
     # Actor should have been restarted — send another message
     result = bus.request(
-      Arcana::Envelope.new(from: "tester", to: "crashy",
+      Arcana::Envelope.new(from: "@tester", to: "@crashy",
         payload: Arcana::Protocol.request(JSON::Any.new("after-restart"))),
       timeout: 1.second,
     )
@@ -68,12 +68,12 @@ describe Arcana::Supervisor do
       within: 1.second,
     )
 
-    actor = CrashyActor.new(bus, dir, "always-crash", "Crashy", "Always crashes")
+    actor = CrashyActor.new(bus, dir, "@always-crash", "Crashy", "Always crashes")
     sup.supervise(actor)
 
     # Send messages that cause repeated crashes
     3.times do
-      bus.send(Arcana::Envelope.new(from: "tester", to: "always-crash",
+      bus.send(Arcana::Envelope.new(from: "@tester", to: "@always-crash",
         payload: JSON::Any.new("crash")))
       sleep 50.milliseconds
     end
@@ -89,13 +89,13 @@ describe Arcana::Supervisor do
     dir = Arcana::Directory.new
 
     sup = Arcana::Supervisor.new(bus, dir)
-    a1 = EchoActor.new(bus, dir, "s1", "S1", "s1")
-    a2 = EchoActor.new(bus, dir, "s2", "S2", "s2")
+    a1 = EchoActor.new(bus, dir, "@s1", "S1", "@s1")
+    a2 = EchoActor.new(bus, dir, "@s2", "S2", "@s2")
     sup.supervise(a1)
     sup.supervise(a2)
 
     sup.stop
-    dir.lookup("s1").should be_nil
-    dir.lookup("s2").should be_nil
+    dir.lookup("@s1").should be_nil
+    dir.lookup("@s2").should be_nil
   end
 end

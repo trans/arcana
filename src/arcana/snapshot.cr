@@ -139,19 +139,35 @@ module Arcana
           STDERR.puts "Snapshot: dropping unmappable legacy listing #{original.inspect} (re-register with owner:capability)"
           next
         end
+        # Restore kind from the snapshot; fall back to the constructor's
+        # derivation only if the snapshot predates kind persistence.
+        kind_str = entry.str?("kind")
+        kind = case kind_str
+               when "agent"   then Directory::Kind::Agent
+               when "service" then Directory::Kind::Service
+               end
         listing = Directory::Listing.new(
           address: address,
           name: entry.str?("name") || address,
           description: entry.str("description"),
+          kind: kind,
           schema: entry["schema"]?,
           guide: entry.str?("guide"),
           tags: entry.str_arr("tags"),
         )
         unless directory.lookup(address)
-          directory.register(listing)
-          if last_seen_raw = entry.str?("last_seen")
-            ts = (Time.parse_rfc3339(last_seen_raw) rescue nil)
-            directory.set_last_seen(address, ts) if ts
+          begin
+            directory.register(listing)
+            if last_seen_raw = entry.str?("last_seen")
+              ts = (Time.parse_rfc3339(last_seen_raw) rescue nil)
+              directory.set_last_seen(address, ts) if ts
+            end
+          rescue ex : Arcana::Error
+            # Post-0.30 sigil enforcement rejects legacy listings whose
+            # kind/address combo doesn't match (e.g. bare-name agents).
+            # Drop with a warning so the daemon comes up clean — the
+            # owner can re-register with the correct sigil.
+            STDERR.puts "Snapshot: dropping incompatible legacy listing #{address.inspect} — #{ex.message}"
           end
         end
       end

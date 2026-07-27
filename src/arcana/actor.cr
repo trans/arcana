@@ -66,6 +66,7 @@ module Arcana
         address: @address,
         name: @name,
         description: @description,
+        kind: Directory::Kind::Agent,
         schema: @schema,
         guide: @guide,
         tags: @tags,

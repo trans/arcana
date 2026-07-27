@@ -31,7 +31,7 @@ describe Arcana::ChatAgent do
     agent = Arcana::ChatAgent.new(
       bus: bus,
       directory: dir,
-      address: "bot",
+      address: "@bot",
       name: "Bot",
       description: "Test bot",
       provider: provider,
@@ -40,12 +40,12 @@ describe Arcana::ChatAgent do
     agent.start
 
     # Create a sender mailbox.
-    sender = bus.mailbox("alice")
+    sender = bus.mailbox("@alice")
 
     # Send a message to the bot.
     bus.send(Arcana::Envelope.new(
-      from: "alice",
-      to: "bot",
+      from: "@alice",
+      to: "@bot",
       subject: "hello",
       payload: JSON::Any.new({"message" => JSON::Any.new("Hi there!")}),
     ))
@@ -53,7 +53,7 @@ describe Arcana::ChatAgent do
     # Wait for the reply.
     reply = sender.receive(5.seconds)
     reply.should_not be_nil
-    reply.not_nil!.from.should eq("bot")
+    reply.not_nil!.from.should eq("@bot")
 
     payload = reply.not_nil!.payload
     msg = payload["message"]?.try(&.as_s?)
@@ -71,19 +71,19 @@ describe Arcana::ChatAgent do
     agent = Arcana::ChatAgent.new(
       bus: bus,
       directory: dir,
-      address: "bot",
+      address: "@bot",
       name: "Bot",
       description: "Test bot",
       provider: provider,
     )
     agent.start
 
-    alice = bus.mailbox("alice")
-    bob = bus.mailbox("bob")
+    alice = bus.mailbox("@alice")
+    bob = bus.mailbox("@bob")
 
     # Alice sends
     bus.send(Arcana::Envelope.new(
-      from: "alice", to: "bot",
+      from: "@alice", to: "@bot",
       payload: JSON::Any.new({"message" => JSON::Any.new("from alice")}),
     ))
     reply_a = alice.receive(5.seconds)
@@ -91,7 +91,7 @@ describe Arcana::ChatAgent do
 
     # Bob sends
     bus.send(Arcana::Envelope.new(
-      from: "bob", to: "bot",
+      from: "@bob", to: "@bot",
       payload: JSON::Any.new({"message" => JSON::Any.new("from bob")}),
     ))
     reply_b = bob.receive(5.seconds)
@@ -112,7 +112,7 @@ describe Arcana::ChatAgent do
     agent = Arcana::ChatAgent.new(
       bus: bus,
       directory: dir,
-      address: "bot",
+      address: "@bot",
       name: "Bot",
       description: "Test bot",
       provider: provider,
@@ -122,9 +122,9 @@ describe Arcana::ChatAgent do
     # Instead, test on_error by sending from empty address (should be ignored).
     agent.start
 
-    sender = bus.mailbox("sender")
+    sender = bus.mailbox("@sender")
     bus.send(Arcana::Envelope.new(
-      from: "sender", to: "bot",
+      from: "@sender", to: "@bot",
       payload: JSON::Any.new("raw string payload"),
     ))
 
@@ -146,7 +146,7 @@ describe Arcana::ChatAgent do
     agent = Arcana::ChatAgent.new(
       bus: bus,
       directory: dir,
-      address: "bot",
+      address: "@bot",
       name: "Bot",
       description: "Test bot",
       provider: provider,
@@ -154,7 +154,7 @@ describe Arcana::ChatAgent do
     agent.start
 
     bus.send(Arcana::Envelope.new(
-      from: "", to: "bot",
+      from: "", to: "@bot",
       payload: JSON::Any.new({"message" => JSON::Any.new("ghost")}),
     ))
 
@@ -171,7 +171,7 @@ describe Arcana::ChatAgent do
     agent = Arcana::ChatAgent.new(
       bus: bus,
       directory: dir,
-      address: "bot",
+      address: "@bot",
       name: "Bot",
       description: "Test bot",
       provider: provider,
@@ -179,7 +179,7 @@ describe Arcana::ChatAgent do
     )
     agent.start
 
-    listing = dir.lookup("bot")
+    listing = dir.lookup("@bot")
     listing.should_not be_nil
     listing.not_nil!.name.should eq("Bot")
     listing.not_nil!.tags.should eq(["test", "ai"])

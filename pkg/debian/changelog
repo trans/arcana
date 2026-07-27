@@ -1,3 +1,25 @@
+arcana (0.30.0-1) unstable; urgency=medium
+
+  * BREAKING: the `@` sigil for agent addresses is now enforced at
+    registration (via arcana-core 0.14.0). Registering with
+    `kind: "agent"` and a bare (non-`@`) address is rejected with a
+    helpful error naming the fix ("Register as `@foo` instead"). And
+    vice versa: `kind: "service"` addresses must not carry the `@`
+    prefix. Answers the recurring "why isn't my agent working"
+    confusion — the error is now immediate and actionable instead
+    of a silent misregistration.
+  * Actor base class now registers itself with `kind: agent`
+    explicitly. Actor addresses must use `@name` — bare-name Actor
+    subclasses will fail at register time.
+  * Snapshot restore is defensive: legacy listings from pre-0.30
+    snapshots whose kind/address combo violates the sigil rule are
+    dropped with a warning ("Snapshot: dropping incompatible legacy
+    listing 'foo' — ..."). The owner just re-registers with the
+    correct sigil.
+  * Depends on arcana-core ~> 0.14.0.
+
+ -- trans <transfire@gmail.com>  Sun, 27 Jul 2026 00:00:00 +0000
+
 arcana (0.29.1-1) unstable; urgency=medium
 
   * `arcana setup --verify` was using `from: "arcana-setup-verify"`

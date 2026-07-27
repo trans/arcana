@@ -8,7 +8,7 @@ describe Arcana::Server do
     dir = Arcana::Directory.new
 
     dir.register(Arcana::Directory::Listing.new(
-      address: "test-agent",
+      address: "@test-agent",
       name: "Test Agent",
       description: "A test agent",
       tags: ["test"],
@@ -29,7 +29,7 @@ describe Arcana::Server do
       resp.status_code.should eq(200)
       listings = JSON.parse(resp.body).as_a
       listings.size.should eq(1)
-      listings[0]["address"].as_s.should eq("test-agent")
+      listings[0]["address"].as_s.should eq("@test-agent")
 
       # GET /directory?tag=test
       resp = HTTP::Client.get("http://127.0.0.1:14000/directory?tag=test")
@@ -43,8 +43,8 @@ describe Arcana::Server do
       resp = HTTP::Client.get("http://127.0.0.1:14000/directory?kind=agent")
       JSON.parse(resp.body).as_a.size.should eq(1)
 
-      # GET /directory/test-agent
-      resp = HTTP::Client.get("http://127.0.0.1:14000/directory/test-agent")
+      # GET /directory/@test-agent
+      resp = HTTP::Client.get("http://127.0.0.1:14000/directory/@test-agent")
       resp.status_code.should eq(200)
       JSON.parse(resp.body)["name"].as_s.should eq("Test Agent")
 
@@ -234,7 +234,7 @@ describe Arcana::Server do
         dir.events = backend
 
         dir.register(Arcana::Directory::Listing.new(
-          address: "test-agent", name: "Test", description: "t",
+          address: "@test-agent", name: "Test", description: "t",
         ))
         server = Arcana::Server.new(bus, dir, port: 14300)
         server.events = backend
@@ -245,7 +245,7 @@ describe Arcana::Server do
         resp.status_code.should eq(200)
         events = JSON.parse(resp.body).as_a
         events.size.should be > 0
-        events.any? { |e| e["type"].as_s == "listing.registered" && e["subject"].as_s == "test-agent" }.should be_true
+        events.any? { |e| e["type"].as_s == "listing.registered" && e["subject"].as_s == "@test-agent" }.should be_true
 
         # Filter by type
         resp = HTTP::Client.get("http://127.0.0.1:14300/events?type=listing.registered")
