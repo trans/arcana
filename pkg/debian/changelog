@@ -1,3 +1,26 @@
+arcana (0.31.0-1) unstable; urgency=medium
+
+  * Chain-of-thought / extended thinking support in the bus services
+    (via arcana-ai 0.2.0). Every provider's `chat` tool now accepts
+    an optional `thinking` field in the payload:
+    - `thinking: true` — enable with defaults
+    - `thinking: {budget: 2048}` — set thinking token budget (Anthropic, Gemini)
+    - `thinking: {effort: "high"}` — set reasoning tier (OpenAI o-series)
+    - `thinking: {include_thoughts: false}` — Gemini can opt out of surfacing thought parts
+  * Responses surface reasoning fields when available:
+    - `thinking_content` — the reasoning text (Anthropic, Gemini with include_thoughts)
+    - `reasoning_tokens` — reasoning token spend (OpenAI o-series, Gemini)
+  * Provider mapping:
+    - anthropic → `thinking: {type: enabled, budget_tokens: N}`
+    - openai → `reasoning_effort` + `max_completion_tokens` (requires o-series model)
+    - gemini → `generationConfig.thinkingConfig`
+  * Bus service tool schemas now document the thinking field. Callers
+    picking non-reasoning models can just omit it; behavior is
+    unchanged for legacy calls.
+  * Depends on arcana-ai ~> 0.2.0.
+
+ -- trans <transfire@gmail.com>  Sun, 27 Jul 2026 12:00:00 +0000
+
 arcana (0.30.0-1) unstable; urgency=medium
 
   * BREAKING: the `@` sigil for agent addresses is now enforced at

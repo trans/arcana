@@ -264,10 +264,10 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     tags: ["llm", "openai"],
   )
 
-  chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150)"}},"required":["messages"]}))
+  chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini). For reasoning: o1, o3, o4-mini, etc."},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150). For reasoning models, this is the max_completion_tokens cap."},"thinking":{"description":"Enable reasoning. `true` uses defaults; `{effort: \"low\"|\"medium\"|\"high\"}` controls the tier. Requires an o-series model (o1, o3, o4-mini). Response includes reasoning_tokens count; OpenAI does not surface the reasoning text."}},"required":["messages"]}))
 
   openai_ts.tool("chat",
-    "Chat completion. Send messages array; get content, model, finish_reason, token counts back.",
+    "Chat completion. Send messages array; get content, model, finish_reason, token counts back. Optional `thinking: true` for reasoning models.",
     input_schema: chat_openai_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
@@ -277,15 +277,20 @@ if openai_key = ENV["OPENAI_API_KEY"]?
       model: data.str("model"),
       temperature: data.float("temperature", 0.7),
       max_tokens: data.int("max_tokens", 150),
+      thinking: Arcana::AI::Chat::ThinkingConfig.from_json(data["thinking"]?),
     )
     response = chat_openai.complete(request)
-    JSON::Any.new({
+    h = {
       "content"           => JSON::Any.new(response.content || ""),
       "model"             => JSON::Any.new(response.model),
       "finish_reason"     => JSON::Any.new(response.finish_reason || ""),
       "prompt_tokens"     => JSON::Any.new(response.prompt_tokens || 0),
       "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
-    })
+    } of String => JSON::Any
+    if rt = response.reasoning_tokens
+      h["reasoning_tokens"] = JSON::Any.new(rt)
+    end
+    JSON::Any.new(h)
   end
 
   embed_schema = JSON.parse(%({"type":"object","properties":{"texts":{"type":"array","items":{"type":"string"},"description":"Texts to embed"},"model":{"type":"string","description":"Model (default: text-embedding-3-small)"}},"required":["texts"]}))
@@ -361,10 +366,10 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
     tags: ["llm", "anthropic", "claude", "web"],
   )
 
-  chat_anthropic_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: claude-sonnet-4-20250514)"},"temperature":{"type":"number","description":"Sampling temperature (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"web_search":{"type":"boolean","description":"If true, Claude can search the web during its response. The model decides when/whether. Default: false."}},"required":["messages"]}))
+  chat_anthropic_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: claude-sonnet-4-20250514)"},"temperature":{"type":"number","description":"Sampling temperature (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"web_search":{"type":"boolean","description":"If true, Claude can search the web during its response. The model decides when/whether. Default: false."},"thinking":{"description":"Enable extended thinking. `true` uses defaults (budget: 1024); `{budget: N}` sets the thinking token budget (must be less than max_tokens). Response includes thinking_content with the reasoning text."}},"required":["messages"]}))
 
   anthropic_ts.tool("chat",
-    "Chat completion via Claude. Optional web_search:true lets the model browse.",
+    "Chat completion via Claude. Optional web_search:true lets the model browse. Optional thinking:true enables extended thinking.",
     input_schema: chat_anthropic_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
@@ -379,15 +384,20 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
       temperature: data.float("temperature", 0.7),
       max_tokens: data.int("max_tokens", 4096),
       server_tools: server_tools,
+      thinking: Arcana::AI::Chat::ThinkingConfig.from_json(data["thinking"]?),
     )
     response = chat_anthropic.complete(request)
-    JSON::Any.new({
+    h = {
       "content"           => JSON::Any.new(response.content || ""),
       "model"             => JSON::Any.new(response.model),
       "finish_reason"     => JSON::Any.new(response.finish_reason || ""),
       "prompt_tokens"     => JSON::Any.new(response.prompt_tokens || 0),
       "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
-    })
+    } of String => JSON::Any
+    if tc = response.thinking_content
+      h["thinking_content"] = JSON::Any.new(tc)
+    end
+    JSON::Any.new(h)
   end
 
   anthropic_ts.start
@@ -404,10 +414,10 @@ if google_key = ENV["GOOGLE_API_KEY"]?
     tags: ["llm", "gemini", "google"],
   )
 
-  chat_gemini_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: gemini-2.5-flash)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"}},"required":["messages"]}))
+  chat_gemini_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: gemini-2.5-flash)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"thinking":{"description":"Enable thinking (Gemini 2.5 series). `true` uses defaults; `{budget: N, include_thoughts: bool}` controls the budget and whether the model surfaces its thoughts. Response includes thinking_content when include_thoughts is true, and reasoning_tokens either way."}},"required":["messages"]}))
 
   gemini_ts.tool("chat",
-    "Chat completion via Gemini. System messages become systemInstruction.",
+    "Chat completion via Gemini. System messages become systemInstruction. Optional thinking:true for 2.5 series reasoning.",
     input_schema: chat_gemini_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
@@ -417,15 +427,23 @@ if google_key = ENV["GOOGLE_API_KEY"]?
       model: data.str("model"),
       temperature: data.float("temperature", 0.7),
       max_tokens: data.int("max_tokens", 4096),
+      thinking: Arcana::AI::Chat::ThinkingConfig.from_json(data["thinking"]?),
     )
     response = chat_gemini.complete(request)
-    JSON::Any.new({
+    h = {
       "content"           => JSON::Any.new(response.content || ""),
       "model"             => JSON::Any.new(response.model),
       "finish_reason"     => JSON::Any.new(response.finish_reason || ""),
       "prompt_tokens"     => JSON::Any.new(response.prompt_tokens || 0),
       "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
-    })
+    } of String => JSON::Any
+    if tc = response.thinking_content
+      h["thinking_content"] = JSON::Any.new(tc)
+    end
+    if rt = response.reasoning_tokens
+      h["reasoning_tokens"] = JSON::Any.new(rt)
+    end
+    JSON::Any.new(h)
   end
 
   gemini_ts.start
