@@ -150,7 +150,9 @@ Sigil convention (parallel to `@` for agents):
 
 ### Topic semantics: fan-out vs shared log
 
-Two plausible models, real difference.
+**Decision (2026-07-28): Model B — shared log.** See "MVP: shared-log
+topics" section below for the concrete scope. Prior weighing kept for
+context:
 
 **Model A — Fan-out (what arcana does today, cosmetic change):**
 - Topic address is a routing hub with no persistent queue.
@@ -159,19 +161,107 @@ Two plausible models, real difference.
 - Simple. Stateless topics.
 
 **Model B — Shared log (Kafka / NATS JetStream shape):**
-- Topic address has a real persistent queue.
-- Publish = append to that queue.
+- Topic address has a real persistent queue (backed by a mailbox).
+- Publish = append to that queue + fan small notifications.
 - Anyone (if public) reads from any offset with their own cursor.
 - Subscribing = "notify me when new entries land."
 - Late subscribers can catch up. One-source-of-truth per channel.
-- Requires: retention policy per topic, cursor management,
-  persistence.
+- Requires: retention policy per topic, cursor semantics, cadence
+  handling.
 
-Model A gets 80% of the unifying win with essentially zero
-implementation cost. Model B is a real feature we can layer on later.
+Why B won: the sigil unification (`@agent`, `service`, `#topic` all
+"mailboxes with sigils") is only coherent if `#topic` really is a
+mailbox — same read API, same peek, same storage. Under Model A a
+`#topic` would be a routing hub that looks like a mailbox but isn't
+readable, which breaks the framing. Model B also eliminates the N-copy
+fan-out cost (1 payload + N tiny notifications instead of N full
+copies) and lets late/offline consumers catch up without special
+infrastructure.
 
-**Recommendation: start with Model A, defer B until there's a concrete
-consumer.**
+## MVP: shared-log topics
+
+Concrete scope for the first cut. Anything not listed is deferred.
+
+**In scope:**
+
+1. **`#` sigil recognized; new `Directory::Kind::Topic`.**
+   Address rules symmetric with `@` for agents: `#name` required for
+   `kind: topic`; registering a topic without `#` (or an agent with `#`)
+   raises with a clear error message.
+2. **Registration required.** No lazy topic creation. Publishing to an
+   unregistered `#topic` fails loudly. Registration carries retention
+   policy, description, tags — same shape as agent/service registration.
+   Reasons: symmetry with other sigiled kinds, typo containment
+   (`#new` vs `#news` fails instead of silently vanishing), and giving
+   retention/ownership/schema a place to live.
+3. **Retention: bounded ring, default 10 000 entries.** Registration
+   can override:
+   `arcana_register kind:"topic" address:"#news" retention:{ring: 50000}`
+   TTL-based retention is a later addition — ring covers the common
+   case.
+4. **Publish = 1 append + N notifications.**
+   `publish(topic, envelope)`:
+   - Append the envelope once to the topic's mailbox (single copy).
+   - For each subscriber, deliver a small notification envelope to
+     their private mailbox.
+   Notification payload shape:
+   ```json
+   {"topic":"#news","from":"@alice","seq":42,
+    "correlation_id":"abc","subject":"Q3 planning notes"}
+   ```
+   No full payload in the notification — subscriber reads the topic
+   mailbox with `after:<seq>` if they want the content.
+5. **Subscribe with `cadence: "always"` only for MVP.**
+   `arcana_subscribe topic:"#news" cadence:"always"` — real-time
+   notification on every publish. The field is accepted from day one;
+   values other than `"always"` return "not yet implemented" so the
+   API doesn't need to change when digest cadences land.
+6. **Cursor reads are peek-only, client-side cursor.**
+   `arcana_inbox address:"#news" after:<seq>` — non-destructive,
+   returns messages since the caller-supplied seq. `arcana_receive`
+   on a `#topic` is rejected (destructive receive is incompatible
+   with sharing — first-come-first-serve turns it into a work queue).
+7. **Discovery.** `arcana_directory kind:"topic"` lists topics with
+   description/tags/retention.
+8. **`sys.message.sent` migration.** Renamed to `#sys.message.sent`
+   (still called `.sent` here — see #3 in the main proposal, which
+   would rename it to `#sys.message.delivered` if that ships in the
+   same bundle). Bus registers it itself on startup; write is
+   restricted to the bus (`send`/`send?` hooks); anyone can peek or
+   subscribe. The metadata payload is already small (~200 bytes), so
+   this topic doesn't gain much from "1 vs N copies" — its win from
+   the migration is purely uniformity + peek-without-subscribe.
+
+**Deferred (accept API shape, defer implementation):**
+
+- **Cadence > `always`.** Daily/weekly/monthly digests need a
+  per-(subscriber, topic) scheduler with `next_fire_at` and pending
+  seq buffer, must survive restart, must handle catch-up if the bus
+  was down over a fire time. Real infrastructure — build after MVP.
+- **Server-tracked cursors.** MVP puts the cursor client-side.
+  Consumers who want managed cursors can either store the last-seen
+  seq themselves or subscribe (using notification seq as their
+  cursor). A managed-cursor mode can be layered on later without
+  breaking the peek API.
+- **Filtered subscriptions.** Server-side predicates
+  (`arcana_subscribe #news filter:{tag:"security"}`) are a nice-to-have,
+  not MVP.
+- **Per-topic ACLs.** Anyone can publish and subscribe by default.
+  Access control ties into the SaaS auth story (Stage 3+) and inherits
+  whatever listing-level policy that sprint produces.
+
+**Open MVP questions still worth revisiting before implementation:**
+
+- Notification for a `#topic` — deliver directly to the subscriber's
+  mailbox, or through a wrapper envelope so subscribers can
+  distinguish topic-notifications from direct mail? Probably a
+  distinct `subject: "topic.notification"` on the envelope plus the
+  notification payload above is enough.
+- What happens to notifications when a subscriber's mailbox is full?
+  Current `sys.message.sent` firehose drops silently
+  (`broadcast_system_send`). Same policy here — best-effort — since
+  the subscriber can always catch up by reading the topic mailbox
+  directly.
 
 ### Access control on topics (and everything else)
 
@@ -222,9 +312,10 @@ new ones may.
 
 - Per-message durability across hard crashes (Postgres event backend
   is the tracked path; separate from this cleanup).
-- Model B (Kafka-shape shared-log topics). Layer on later.
 - Full access-control enforcement. Just a stub field maybe.
 - Rename of `Directory::Listing` itself. Struct name is fine.
+- Cadence handling beyond `always`, server-tracked cursors, filtered
+  subscriptions, per-topic ACLs — all v2 of the shared-log MVP.
 
 ## Origin
 
