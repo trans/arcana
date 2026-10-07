@@ -326,21 +326,13 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     )
 
     if inline
-      # TODO: promote to arcana-ai (add synthesize_bytes on TTS::Provider)
-      # so this stops round-tripping through disk.
-      temp = File.tempname("arcana-tts-", ".#{request.response_format}")
-      begin
-        result = tts_openai.synthesize(request, temp)
-        audio = Base64.strict_encode(File.read(temp))
-        JSON::Any.new({
-          "audio_base64"   => JSON::Any.new(audio),
-          "model"          => JSON::Any.new(result.model),
-          "content_type"   => JSON::Any.new(result.content_type),
-          "content_length" => JSON::Any.new(result.content_length),
-        })
-      ensure
-        File.delete(temp) if File.exists?(temp)
-      end
+      result = tts_openai.synthesize(request)
+      JSON::Any.new({
+        "audio_base64"   => JSON::Any.new(Base64.strict_encode(result.audio)),
+        "model"          => JSON::Any.new(result.model),
+        "content_type"   => JSON::Any.new(result.content_type),
+        "content_length" => JSON::Any.new(result.content_length),
+      })
     else
       result = tts_openai.synthesize(request, output_path.not_nil!)
       JSON::Any.new({

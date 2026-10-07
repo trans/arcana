@@ -1,3 +1,15 @@
+arcana (0.31.1-1) unstable; urgency=medium
+
+  * openai `tts` with `inline: true` returns the audio straight from
+    memory instead of writing a temp file, reading it back and deleting
+    it (uses arcana-ai 0.3.0's in-memory `synthesize`).
+  * Picks up arcana-ai 0.3.0 fixes: Runware PuLID/ACE++ identity requests
+    that Runware honours, and OpenAI cached prompt tokens in
+    `cache_read_tokens`.
+  * Depends on arcana-ai ~> 0.3.0.
+
+ -- trans <transfire@gmail.com>  Tue, 06 Oct 2026 12:00:00 +0000
+
 arcana (0.31.0-1) unstable; urgency=medium
 
   * Chain-of-thought / extended thinking support in the bus services
