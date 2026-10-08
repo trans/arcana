@@ -1,3 +1,19 @@
+arcana (0.32.1-1) unstable; urgency=medium
+
+  * Fix: a project that got `.ai/` after its first registration lost its
+    owner token (it was kept under XDG state, and only `.ai/` was checked
+    afterwards), so the next session was refused its own handle as "held
+    by another owner". The token now moves into `.ai/arcana.token`.
+  * Bus chat services pick up arcana-ai 0.4.0: rate limits, server errors
+    and network errors are retried by default (up to 3 times, waiting as
+    long as the provider asks, at most 30 s), so a sync request can take
+    longer before it fails.
+  * Fix: `ChatAgent` sent "gpt-4o-mini" whatever provider it wrapped when
+    no model was set; it now leaves the model to the provider.
+  * Depends on arcana-ai ~> 0.4.0.
+
+ -- trans <transfire@gmail.com>  Thu, 08 Oct 2026 12:00:00 +0000
+
 arcana (0.32.0-1) unstable; urgency=medium
 
   * Agents can tell their own registration from someone else's. The

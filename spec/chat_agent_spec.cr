@@ -3,6 +3,7 @@ require "./spec_helper"
 # Fake chat provider that echoes back the last user message.
 class FakeChatProvider < Arcana::AI::Chat::Provider
   getter call_count : Int32 = 0
+  getter models = [] of String
 
   def name : String
     "fake"
@@ -10,6 +11,7 @@ class FakeChatProvider < Arcana::AI::Chat::Provider
 
   def complete(request : Arcana::AI::Chat::Request) : Arcana::AI::Chat::Response
     @call_count += 1
+    @models << request.model
     # Echo the last user message content.
     last_user = request.messages.reverse.find { |m| m.role == "user" }
     content = last_user.try(&.content) || "no message"
@@ -61,6 +63,20 @@ describe Arcana::ChatAgent do
     msg.not_nil!.should contain("Hi there!")
 
     provider.call_count.should eq(1)
+  end
+
+  it "leaves the model to the provider unless one is set" do
+    {"" => "", "claude-x" => "claude-x"}.each do |configured, sent|
+      bus = Arcana::Bus.new
+      provider = FakeChatProvider.new
+      Arcana::ChatAgent.new(bus: bus, directory: Arcana::Directory.new, address: "@bot", name: "Bot",
+        description: "d", provider: provider, model: configured).start
+      sender = bus.mailbox("@alice")
+      bus.send(Arcana::Envelope.new(from: "@alice", to: "@bot",
+        payload: JSON::Any.new({"message" => JSON::Any.new("hi")})))
+      sender.receive(5.seconds).should_not be_nil
+      provider.models.should eq([sent])
+    end
   end
 
   it "maintains separate histories per correspondent" do

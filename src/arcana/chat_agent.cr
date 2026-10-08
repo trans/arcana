@@ -57,11 +57,10 @@ module Arcana
       history.add_user(user_content)
       history.trim_if_needed
 
-      # Build the chat request.
-      model = @model.empty? ? "gpt-4o-mini" : @model
+      # Build the chat request. An empty model means the provider's own.
       request = AI::Chat::Request.new(
         messages: history.messages,
-        model: model,
+        model: @model,
         temperature: @temperature,
         max_tokens: @max_tokens,
       )

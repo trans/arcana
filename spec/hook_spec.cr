@@ -103,6 +103,29 @@ describe Arcana::AgentConfig do
     end
   end
 
+  it "moves the XDG-state token into .ai/ when the project gains one" do
+    with_clean_env do
+      dir = File.tempname("arcana-later-ai")
+      Dir.mkdir_p(dir)
+      Process.run("git", ["init", "-q", dir])
+      begin
+        before = Arcana::AgentConfig.load(dir)
+        token = before.owner_token!
+        old_path = before.token_path
+
+        Dir.mkdir_p(File.join(dir, ".ai"))
+        after = Arcana::AgentConfig.load(dir)
+        after.owner_token.should eq(token)
+        after.owner_token!.should eq(token)
+        File.exists?(old_path).should be_false
+        (File.info(after.token_path).permissions.value & 0o077).should eq(0)
+        File.read(File.join(dir, ".git", "info", "exclude")).should contain("**/.ai/arcana.token")
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   it "keeps the token under XDG state for a project without .ai/" do
     with_clean_env do
       dir = File.tempname("arcana-noai")

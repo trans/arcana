@@ -72,18 +72,33 @@ module Arcana
     end
 
     def token_path : String
-      if ai_dir?
-        File.join(@project_dir, ".ai", TOKEN_FILE)
-      else
-        state = ENV["XDG_STATE_HOME"]?.try(&.presence) || File.join(Path.home.to_s, ".local", "state")
-        File.join(state, "arcana", "tokens", @handle.lchop('@'))
-      end
+      ai_dir? ? File.join(@project_dir, ".ai", TOKEN_FILE) : state_token_path
+    end
+
+    private def state_token_path : String
+      state = ENV["XDG_STATE_HOME"]?.try(&.presence) || File.join(Path.home.to_s, ".local", "state")
+      File.join(state, "arcana", "tokens", @handle.lchop('@'))
     end
 
     # The owner token, or nil if none has been made yet.
     def owner_token : String?
       path = token_path
-      File.read(path).strip.presence if File.exists?(path)
+      return File.read(path).strip.presence if File.exists?(path)
+      adopt_state_token
+    end
+
+    # A project that gained `.ai/` after its first registration still has
+    # its token under XDG state. Move it into `.ai/`: a new token would
+    # make the bus refuse the handle as held by another owner.
+    private def adopt_state_token : String?
+      return nil unless ai_dir?
+      old = state_token_path
+      return nil unless File.exists?(old)
+      token = File.read(old).strip.presence || return nil
+      File.write(token_path, "#{token}\n", perm: 0o600)
+      exclude_from_git
+      File.delete(old)
+      token
     end
 
     # The owner token, made on first use.
