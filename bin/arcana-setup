@@ -10,8 +10,9 @@
 #   4. Global MCP registration (`claude mcp add arcana --scope user -- arcana-mcp`)
 #      if the `claude` CLI is available
 #
-# Nothing is per-project — the hooks derive the agent address from
-# $CLAUDE_PROJECT_DIR at hook time, so one setup covers every project.
+# Nothing is per-project — the hooks read each project's .ai/config.yml
+# at hook time (falling back to @<directory name>), so one setup covers
+# every project. Codex gets the same hooks when ~/.codex exists.
 #
 # Usage:
 #   arcana setup             # do the setup
@@ -41,6 +42,7 @@ Reads no env vars. Writes to:
   ~/.claude/hooks/arcana-*.sh
   ~/.claude/settings.json
   ~/.claude.json (via `claude mcp add`)
+  ~/.codex/hooks/arcana-*.sh and ~/.codex/hooks.json (if ~/.codex exists)
 HELP
       exit 0
       ;;
@@ -72,79 +74,30 @@ echo "  MCP binary: $MCP_BIN"
 echo ""
 
 # --- 1. Install hook scripts ---
+#
+# Each hook is a one-line wrapper around `arcana hook <event>`, which does
+# the work for both agents: the handle and description come from the
+# project's .ai/config.yml (falling back to @<directory name>), the
+# registration carries the project's owner token, session start tells the
+# agent who it is on the bus, and session end moves unread mail into
+# .ai/inbox/ and marks the handle offline instead of unregistering it.
+
+# write_hook <path> <event> <agent> <comment>
+write_hook() {
+  cat > "$1" << HOOK
+#!/bin/bash
+# $4
+# Installed by \`arcana setup\`; the logic lives in \`arcana hook\`.
+command -v arcana >/dev/null 2>&1 || exit 0
+exec arcana hook $2 --agent $3
+HOOK
+  chmod +x "$1"
+}
 
 mkdir -p "$HOOKS_DIR"
-
-cat > "$HOOKS_DIR/arcana-register.sh" << 'HOOK'
-#!/bin/bash
-# SessionStart hook: register on Arcana bus using `@<basename>` sigil convention
-# for agent handles. The `@` distinguishes conversational identities
-# (project's Claude/Codex) from same-name tool services (e.g. `mj` the
-# service vs `@mj` the project agent).
-
-address="@$(basename "$CLAUDE_PROJECT_DIR")"
-
-curl -sf http://127.0.0.1:19118/register \
-  -H "Content-Type: application/json" \
-  -d "{\"address\":\"$address\",\"kind\":\"agent\"}" \
-  >/dev/null 2>&1
-
-exit 0
-HOOK
-
-cat > "$HOOKS_DIR/arcana-mail.sh" << 'HOOK'
-#!/bin/bash
-# Stop hook: check Arcana bus for pending mail before Claude ends its turn.
-# Uses @<basename> address (agent-handle convention).
-# Notifies once per pending-count change to avoid infinite stop loops.
-
-input=$(cat)
-address="@$(basename "$CLAUDE_PROJECT_DIR")"
-
-response=$(curl -sf http://127.0.0.1:19118/peek \
-  -H "Content-Type: application/json" \
-  -d "{\"address\":\"$address\"}" 2>/dev/null)
-
-# If Arcana isn't running or no response, let Claude stop normally.
-[ -z "$response" ] && exit 0
-
-pending=$(echo "$response" | jq -r '.pending // 0')
-[ "$pending" -eq 0 ] && exit 0
-
-# Only notify once — if we already notified for this count, let Claude stop.
-flag="/tmp/arcana-mail-$(echo "$address" | tr -c 'a-zA-Z0-9_-' '_')"
-
-if [ -f "$flag" ] && [ "$(cat "$flag")" = "$pending" ]; then
-  rm -f "$flag"
-  exit 0
-fi
-
-echo "$pending" > "$flag"
-
-s="s"; [ "$pending" -eq 1 ] && s=""
-echo "You have mail! ($pending message$s)" >&2
-exit 2
-HOOK
-
-cat > "$HOOKS_DIR/arcana-unregister.sh" << 'HOOK'
-#!/bin/bash
-# SessionEnd hook: unregister from Arcana bus.
-
-address="@$(basename "$CLAUDE_PROJECT_DIR")"
-
-curl -sf http://127.0.0.1:19118/unregister \
-  -H "Content-Type: application/json" \
-  -d "{\"address\":\"$address\"}" \
-  >/dev/null 2>&1
-
-# Clean up mail notification flag.
-flag="/tmp/arcana-mail-$(echo "$address" | tr -c 'a-zA-Z0-9_-' '_')"
-rm -f "$flag"
-
-exit 0
-HOOK
-
-chmod +x "$HOOKS_DIR/arcana-register.sh" "$HOOKS_DIR/arcana-mail.sh" "$HOOKS_DIR/arcana-unregister.sh"
+write_hook "$HOOKS_DIR/arcana-register.sh"   session-start claude "SessionStart hook: register this project's agent on the Arcana bus."
+write_hook "$HOOKS_DIR/arcana-mail.sh"       stop          claude "Stop hook: ask the agent to read waiting Arcana mail before it stops."
+write_hook "$HOOKS_DIR/arcana-unregister.sh" session-end   claude "SessionEnd hook: move unread mail to .ai/inbox/, mark the handle offline."
 echo "  Hooks installed → $HOOKS_DIR/arcana-*.sh"
 
 # --- 2. Merge hooks + permission allow-rules into settings.json ---
@@ -177,6 +130,41 @@ if [ -f "$SETTINGS" ]; then
 else
   echo "$SETTINGS_ADD" | jq . > "$SETTINGS"
   echo "  Settings created → $SETTINGS"
+fi
+
+# --- 2b. Codex hooks (only when Codex is installed) ---
+#
+# Same wrappers, --agent codex. Existing entries in ~/.codex/hooks.json
+# are left exactly as they are: Codex asks the user to trust each hook
+# entry, and rewriting one would ask again.
+
+CODEX_DIR="$HOME/.codex"
+if [ -d "$CODEX_DIR" ]; then
+  CODEX_HOOKS="$CODEX_DIR/hooks"
+  mkdir -p "$CODEX_HOOKS"
+  write_hook "$CODEX_HOOKS/arcana-register.sh"   session-start codex "Codex SessionStart hook: register this project's agent on the Arcana bus."
+  write_hook "$CODEX_HOOKS/arcana-mail.sh"       stop          codex "Codex Stop hook: continue once when this project's Arcana inbox has mail."
+  write_hook "$CODEX_HOOKS/arcana-unregister.sh" session-end   codex "Codex SessionEnd hook: move unread mail to .ai/inbox/, mark the handle offline."
+
+  CODEX_JSON="$CODEX_DIR/hooks.json"
+  [ -f "$CODEX_JSON" ] || echo '{"hooks":{}}' > "$CODEX_JSON"
+  MERGED=$(jq --arg dir "$CODEX_HOOKS" '
+    def ensure(ev; entry):
+      (entry.hooks[0].command) as $cmd
+      | .hooks[ev] = ((.hooks[ev] // [])
+          | if any(.[]?; any(.hooks[]?; .command == $cmd)) then . else . + [entry] end);
+    .hooks //= {}
+    | ensure("SessionStart"; {matcher: "startup|resume|clear",
+        hooks: [{type: "command", command: "\($dir)/arcana-register.sh", timeout: 3, statusMessage: "Registering with Arcana"}]})
+    | ensure("Stop"; {hooks: [{type: "command", command: "\($dir)/arcana-mail.sh", timeout: 3}]})
+    | ensure("SessionEnd"; {hooks: [{type: "command", command: "\($dir)/arcana-unregister.sh", timeout: 3}]})
+  ' "$CODEX_JSON")
+  if [ "$(jq -cS . "$CODEX_JSON")" != "$(echo "$MERGED" | jq -cS .)" ]; then
+    echo "$MERGED" > "$CODEX_JSON"
+    echo "  Codex hooks installed → $CODEX_HOOKS/arcana-*.sh (+ $CODEX_JSON)"
+  else
+    echo "  Codex hooks installed → $CODEX_HOOKS/arcana-*.sh ($CODEX_JSON already lists them)"
+  fi
 fi
 
 # --- 3. Register MCP server globally (user scope) ---

@@ -43,7 +43,7 @@ module Arcana
         inputSchema: {
           type:       "object",
           properties: {
-            from:       {type: "string", description: "Your address on the bus (so replies come back to you)"},
+            from:       {type: "string", description: "Your address on the bus (so replies come back to you). Defaults to this project's handle."},
             to:         {type: "string", description: "Target address on the bus"},
             subject:    {type: "string", description: "Message subject/intent"},
             payload:    {description: "Message payload — pass a JSON OBJECT with the fields the target service expects (e.g. {\"text\":\"hi\",\"output_path\":\"/tmp/x.opus\"} for openai:tts). Not a stringified JSON blob — pass the object directly. The server does auto-unwrap stringified JSON as a fallback, but the tool schema wants an object."},
@@ -68,7 +68,7 @@ module Arcana
       },
       {
         name:        "arcana_register",
-        description: "Register or unregister on the Arcana bus. Default action is 'register' which creates a mailbox and optionally adds a directory listing. Use action 'unregister' to remove your mailbox and listing. Use action 'busy' or 'idle' to update your availability status.",
+        description: "Register or unregister on the Arcana bus. Default action is 'register' which creates a mailbox and optionally adds a directory listing. Use action 'unregister' to remove your mailbox and listing. Use action 'busy' or 'idle' to update your availability status. In a project with a session hook, you are usually registered already: registering your own handle again just refreshes your listing (status \"yours\"), and this bridge supplies the project's owner token for it.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -163,7 +163,14 @@ module Arcana
       },
     ]
 
-    def initialize(@base_url : String = "http://127.0.0.1:19118", @api_key : String? = nil)
+    # This project's identity, from `.ai/config.yml` in the directory the
+    # agent started the bridge in (see `AgentConfig`). Lets the bridge
+    # default `from` to the agent's handle and supply its owner token.
+    getter self_config : AgentConfig?
+
+    def initialize(@base_url : String = "http://127.0.0.1:19118", @api_key : String? = nil,
+                   project_dir : String? = ENV["CLAUDE_PROJECT_DIR"]?.try(&.presence) || Dir.current)
+      @self_config = project_dir.try { |d| AgentConfig.load(d) rescue nil }
       uri = URI.parse(@base_url)
       @http = HTTP::Client.new(uri)  # persistent keep-alive connection
       @http_mutex = Mutex.new         # HTTP::Client is not fiber-safe for concurrent use
@@ -296,7 +303,7 @@ module Arcana
     private def call_deliver(args : JSON::Any) : String
       ordering = args.str("ordering", "auto")
       body = {
-        from:       args.str("from", "mcp-bridge"),
+        from:       args.str("from", default_from),
         to:         args.str("to"),
         subject:    args.str("subject"),
         payload:    args["payload"]? || JSON::Any.new(nil),
@@ -308,12 +315,22 @@ module Arcana
 
     private def call_publish(args : JSON::Any) : String
       body = {
-        from:    args.str("from", "mcp-bridge"),
+        from:    args.str("from", default_from),
         topic:   args.str("topic"),
         subject: args.str("subject"),
         payload: args["payload"]? || JSON::Any.new(nil),
       }.to_json
       http_post("/publish", body)
+    end
+
+    private def default_from : String
+      @self_config.try(&.handle) || "mcp-bridge"
+    end
+
+    # The owner token, when `address` is this project's own handle.
+    private def owner_token_for(address : String) : String?
+      cfg = @self_config
+      cfg.owner_token if cfg && cfg.handle == address
     end
 
     private def call_register(args : JSON::Any) : String
@@ -323,8 +340,9 @@ module Arcana
       case action
       when "unregister"
         body = {
-          address: address,
-          token:   args.str?("token"),
+          address:     address,
+          token:       args.str?("token"),
+          owner_token: owner_token_for(address),
         }.to_json
         result = http_post("/unregister", body)
 
@@ -350,6 +368,7 @@ module Arcana
           guide:       args.str?("guide"),
           tags:        args["tags"]?,
           listed:      args.bool?("listed"),
+          owner_token: owner_token_for(address),
         }.to_json
         result = http_post("/register", body)
 

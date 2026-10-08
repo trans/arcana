@@ -34,6 +34,7 @@ module Arcana
       # persistent by default.
       ephemeral_addrs = Set(String).new
       directory.list.each { |l| ephemeral_addrs << l.address if l.ephemeral }
+      owner_tokens = directory.owner_tokens
 
       JSON.build do |j|
         j.object do
@@ -54,6 +55,10 @@ module Arcana
                   if seen = directory.last_seen(l.address)
                     j.field "last_seen", seen.to_rfc3339
                   end
+                  if owner = owner_tokens[l.address]?
+                    j.field "owner_token", owner
+                  end
+                  j.field "online", false unless directory.online?(l.address)
                 end
               end
             end
@@ -162,6 +167,10 @@ module Arcana
               ts = (Time.parse_rfc3339(last_seen_raw) rescue nil)
               directory.set_last_seen(address, ts) if ts
             end
+            if owner = entry.str?("owner_token")
+              directory.set_owner_token(address, owner) unless owner.empty?
+            end
+            directory.set_online(address, false) if entry["online"]?.try(&.as_bool?) == false
           rescue ex : Arcana::Error
             # Post-0.30 sigil enforcement rejects legacy listings whose
             # kind/address combo doesn't match (e.g. bare-name agents).

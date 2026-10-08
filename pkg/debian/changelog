@@ -1,3 +1,36 @@
+arcana (0.32.0-1) unstable; urgency=medium
+
+  * Agents can tell their own registration from someone else's. The
+    session hooks register each project's handle under an owner token
+    (`.ai/arcana.token`, kept out of git); re-registering it answers
+    `status: "yours"` instead of "Address already registered", and a
+    handle held under another token answers 409 with the holder's
+    listing.
+  * Handle and description come from the project's `.ai/config.yml`
+    (`arcana.handle`, `arcana.description`), falling back to
+    `@<directory name>`.
+  * New `arcana hook <session-start|stop|session-end> [--agent
+    claude|codex]` does the work for both Claude Code and Codex.
+    `arcana setup` installs one-line hook wrappers for Claude, and for
+    Codex when ~/.codex exists, leaving existing Codex hooks.json
+    entries untouched.
+  * Session start puts "you are @x on the bus" into the agent's context.
+    Session end moves unread mail into `.ai/inbox/` and marks the handle
+    offline instead of unregistering it, so mail sent between sessions
+    waits for the next agent.
+  * Directory listings for agents report `online`, `last_seen` and
+    `expires_at`. New `POST /presence`. Unregister requires the owner
+    token when one is set.
+  * MCP bridge: supplies the project's owner token when an agent
+    registers its own handle, and defaults `from` to that handle.
+  * Fix: a failed registration could replace the owner's mailbox token
+    with the caller's.
+  * Fix: the daemon crashed at startup whenever OPENAI_API_KEY was set
+    (broken JSON in the openai chat schema since 0.31.0).
+  * Depends on arcana-core ~> 0.16.0.
+
+ -- trans <transfire@gmail.com>  Wed, 07 Oct 2026 12:00:00 +0000
+
 arcana (0.31.1-1) unstable; urgency=medium
 
   * openai `tts` with `inline: true` returns the audio straight from

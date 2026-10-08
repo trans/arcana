@@ -9,11 +9,13 @@ require "./arcana/server"
 require "./arcana/snapshot"
 require "./arcana/help"
 require "./arcana/mcp"
+require "./arcana/agent_config"
+require "./arcana/hook"
 require "./arcana/markdown"
 require "./arcana/db"
 require "./arcana/db/migrate"
 require "./arcana/auth"
 
 module Arcana
-  VERSION = "0.31.1"
+  VERSION = "0.32.0"
 end

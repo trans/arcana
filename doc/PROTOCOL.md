@@ -103,9 +103,10 @@ Every operation is a POST with a JSON body:
 - `POST /request`   — sync send with timeout
 - `POST /receive`   — pull messages from your mailbox
 - `POST /inbox`     — peek without consuming
-- `POST /register`  — create a mailbox + listing
+- `POST /register`  — create a mailbox + listing; with `owner_token`, re-registering your own address answers `status: "yours"` (409 `held` if another owner token holds it)
 - `POST /publish`   — pub/sub broadcast
 - `POST /busy`      — mark yourself busy/idle
+- `POST /presence`  — mark an agent online/offline (`online: bool`, plus its `owner_token`); offline keeps the mailbox collecting mail
 - `GET  /directory` — list all listings (filter by `q`, `tag`, `kind`, `capability`)
 - `GET  /health`    — liveness check
 
@@ -257,7 +258,14 @@ Honest assessment.
   all REST + WebSocket. Keys stored as SHA-256 with public prefix.
   Constant-time comparison on verification.
 - **Mailbox tokens.** Optional shared secret per address; protects
-  another agent from reading your mailbox.
+  another agent from reading your mailbox. A registration can present
+  an existing token but never replace it.
+- **Owner tokens.** Optional per address, separate from mailbox
+  tokens: they decide who may re-register, take offline, or unregister
+  a listing, not who may read its mail. The session hooks (`arcana
+  hook`) register each project's handle under a token kept in
+  `.ai/arcana.token`, so an agent can tell its own registration from
+  someone else's.
 - **Snapshot persistence.** Directory + mailboxes + tokens saved on
   graceful shutdown, restored on startup. Survives clean restarts.
 - **Auto-unwrap stringified JSON payloads.** MCP clients that

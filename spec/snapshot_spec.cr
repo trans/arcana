@@ -228,4 +228,33 @@ describe Arcana::Snapshot do
       File.delete(path) if File.exists?(path)
     end
   end
+it "round-trips owner tokens and offline presence" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+    bus.directory = dir
+    server = Arcana::Server.new(bus, dir, port: 14130)
+    dir.claim(Arcana::Directory::Listing.new(address: "@proj", name: "p", description: "p"), "mine")
+    dir.set_online("@proj", false)
+    dir.claim(Arcana::Directory::Listing.new(address: "@live", name: "l", description: "l"), "theirs")
+
+    path = File.tempname("arcana-snap-owner", ".json")
+    begin
+      Arcana::Snapshot.save(bus, dir, server, path)
+
+      bus2 = Arcana::Bus.new
+      dir2 = Arcana::Directory.new
+      bus2.directory = dir2
+      Arcana::Snapshot.load(bus2, dir2, Arcana::Server.new(bus2, dir2, port: 14131), path).should be_true
+
+      dir2.online?("@proj").should be_false
+      dir2.online?("@live").should be_true
+      dir2.claim(Arcana::Directory::Listing.new(address: "@proj", name: "p", description: ""), "mine")
+        .should eq(Arcana::Directory::Claim::Yours)
+      expect_raises(Arcana::Directory::HeldError) do
+        dir2.claim(Arcana::Directory::Listing.new(address: "@live", name: "l", description: ""), "mine")
+      end
+    ensure
+      File.delete(path) if File.exists?(path)
+    end
+  end
 end

@@ -225,6 +225,9 @@ module Arcana
       when {"POST", "/busy"}
         handle_post_busy(ctx)
 
+      when {"POST", "/presence"}
+        handle_post_presence(ctx)
+
       when {"POST", "/peek"}
         handle_post_peek(ctx)
 
@@ -234,31 +237,35 @@ module Arcana
       end
     end
 
+    # Register an address. With `owner_token`, re-registering an address
+    # you already hold succeeds (`status: "yours"`) instead of failing,
+    # so an agent can tell its own registration from someone else's;
+    # see `Directory#claim`. The reply carries the listing, including
+    # `online`, `last_seen` and `expires_at` for agents.
     private def handle_post_register(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed.str("address")
       raise "address required" if address.empty?
       Directory.validate_address(address)
 
-      # Store token if provided (agent-chosen shared secret)
-      if token = parsed.str?("token")
-        @tokens[address] = token unless token.empty?
-      end
-
-      # Create mailbox (always — sender check requires has_mailbox?)
-      @bus.mailbox(address)
+      # An existing mailbox token can only be presented, not replaced:
+      # otherwise a registration that fails below would still swap the
+      # owner's token for the caller's.
+      token = parsed.str?("token").try(&.presence)
+      check_token!(address, parsed) if token && @tokens.has_key?(address)
 
       # Register in directory unless caller opted out (e.g. pure consumers
       # that send/subscribe but never accept addressed messages).
       listed = parsed.bool?("listed")
       listed = true if listed.nil?
+      claim = nil
       if listed
         kind_str = parsed.str?("kind")
         kind = case kind_str
                when "service" then Directory::Kind::Service
                when "agent"   then Directory::Kind::Agent
                end
-        @directory.register(Directory::Listing.new(
+        claim = @directory.claim(Directory::Listing.new(
           address: address,
           name: parsed.str?("name") || address,
           description: parsed.str("description"),
@@ -266,14 +273,69 @@ module Arcana
           schema: parsed["schema"]?,
           guide: parsed.str?("guide"),
           tags: parsed.str_arr("tags"),
-        ))
+        ), parsed.str?("owner_token"))
       end
+
+      # Create mailbox (always — sender check requires has_mailbox?)
+      @bus.mailbox(address)
+      @tokens[address] = token if token
       save_state
 
-      ctx.response.print %({"ok":true,"address":"#{address}"})
+      ctx.response.print(JSON.build do |j|
+        j.object do
+          j.field "ok", true
+          j.field "address", address
+          if c = claim
+            j.field "status", c.to_s.downcase
+            if listing = @directory.lookup(address)
+              j.field("listing") { j.raw(@directory.to_json(listing)) }
+            end
+          end
+        end
+      end)
+    rescue ex : Directory::HeldError
+      respond_held(ctx, ex)
     rescue ex
-      ctx.response.status = HTTP::Status::BAD_REQUEST
-      ctx.response.print %({"error":"#{ex.message}"})
+      respond_error(ctx, HTTP::Status::BAD_REQUEST, ex.message)
+    end
+
+    # Mark an agent online or offline. Offline means no session is
+    # running; the mailbox keeps collecting mail. Requires the owner
+    # token when the address was registered with one.
+    private def handle_post_presence(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed.str("address")
+      raise "address required" if address.empty?
+      online = parsed.bool?("online")
+      raise "online (true or false) required" if online.nil?
+      @directory.check_owner!(address, parsed.str?("owner_token"))
+      @directory.set_online(address, online)
+      save_state
+      ctx.response.print({ok: true, address: address, online: online}.to_json)
+    rescue ex : Directory::HeldError
+      respond_held(ctx, ex)
+    rescue ex
+      respond_error(ctx, HTTP::Status::BAD_REQUEST, ex.message)
+    end
+
+    private def respond_error(ctx : HTTP::Server::Context, status : HTTP::Status, message : String?) : Nil
+      ctx.response.status = status
+      ctx.response.print({error: message || "error"}.to_json)
+    end
+
+    # 409 with the holder's public listing, so a caller that is in fact
+    # the holder (but lost its owner token) can recognize itself.
+    private def respond_held(ctx : HTTP::Server::Context, ex : Directory::HeldError) : Nil
+      ctx.response.status = HTTP::Status::CONFLICT
+      ctx.response.print(JSON.build do |j|
+        j.object do
+          j.field "error", ex.message
+          j.field "held", true
+          if listing = @directory.lookup(ex.address)
+            j.field("listing") { j.raw(@directory.to_json(listing)) }
+          end
+        end
+      end)
     end
 
     private def handle_post_unregister(ctx : HTTP::Server::Context)
@@ -282,6 +344,7 @@ module Arcana
       raise "address required" if address.empty?
 
       check_token!(address, parsed)
+      @directory.check_owner!(address, parsed.str?("owner_token"))
 
       @directory.unregister(address)
       @bus.remove_mailbox(address)
@@ -289,6 +352,8 @@ module Arcana
       save_state
 
       ctx.response.print %({"ok":true,"address":"#{address}"})
+    rescue ex : Directory::HeldError
+      respond_held(ctx, ex)
     rescue ex
       ctx.response.status = HTTP::Status::BAD_REQUEST
       ctx.response.print %({"error":"#{ex.message}"})

@@ -17,6 +17,9 @@ when "setup", "init"
     script = File.join(File.dirname(__DIR__), "bin", "arcana-setup")
   end
   exit Process.run(script, ARGV, output: STDOUT, error: STDERR).exit_code
+when "hook"
+  # Session hooks for Claude Code and Codex (installed by `arcana setup`).
+  exit Arcana::Hook.run(ARGV)
 when "version", "--version", "-v"
   puts "Arcana v#{Arcana::VERSION}"
   exit 0
@@ -29,6 +32,7 @@ when "help", "--help", "-h"
   Commands:
     serve   Start the Arcana server (default)
     setup   User/machine setup — install hooks + allow-rules + MCP registration
+    hook    Run a session hook: hook <session-start|stop|session-end> [--agent claude|codex]
     version Show version
 
   Options:
@@ -264,7 +268,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     tags: ["llm", "openai"],
   )
 
-  chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini). For reasoning: o1, o3, o4-mini, etc."},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150). For reasoning models, this is the max_completion_tokens cap."},"thinking":{"description":"Enable reasoning. `true` uses defaults; `{effort: \"low\"|\"medium\"|\"high\"}` controls the tier. Requires an o-series model (o1, o3, o4-mini). Response includes reasoning_tokens count; OpenAI does not surface the reasoning text."}},"required":["messages"]}))
+  chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini). For reasoning: o1, o3, o4-mini, etc."},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150). For reasoning models, this is the max_completion_tokens cap."},"thinking":{"description":"Enable reasoning. `true` uses defaults; `{effort: 'low'|'medium'|'high'}` controls the tier. Requires an o-series model (o1, o3, o4-mini). Response includes reasoning_tokens count; OpenAI does not surface the reasoning text."}},"required":["messages"]}))
 
   openai_ts.tool("chat",
     "Chat completion. Send messages array; get content, model, finish_reason, token counts back. Optional `thinking: true` for reasoning models.",
@@ -650,6 +654,7 @@ Signal::TERM.trap { shutdown.call(Signal::TERM) }
 # -- Periodic prune of stale agent listings and inactive mailboxes --
 
 listing_ttl = (ENV["ARCANA_AGENT_TTL"]? || "604800").to_i.seconds     # 7d default
+dir.agent_ttl = listing_ttl # agent listings report expires_at
 mailbox_ttl = (ENV["ARCANA_MAILBOX_TTL"]? || "2592000").to_i.seconds  # 30d default
 prune_interval = (ENV["ARCANA_PRUNE_INTERVAL"]? || "3600").to_i.seconds # hourly default
 
