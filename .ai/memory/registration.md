@@ -23,4 +23,5 @@ Shipped in arcana 0.32.0 (`8105ad8`) and arcana-core 0.16.0.
   and Codex. Session end moves unread mail into `.ai/inbox/` and marks the
   handle offline instead of unregistering it, so mail sent between sessions
   waits for the next agent. `/clear` is left alone.
-- Known gap: see the owner-token item in [status.md](status.md).
+- A token made under XDG state moves into `.ai/` once the project has one
+  (0.32.1).

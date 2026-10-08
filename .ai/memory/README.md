@@ -7,7 +7,7 @@ changes. `../config.yml` names this project's agent on the Arcana bus.
 
 | File | What it holds |
 |---|---|
-| [status.md](status.md) | Released versions and the open items: arcana-ai 0.4.0 bump, ChatAgent model fallback, owner-token migration, TTS default |
+| [status.md](status.md) | Released versions and the open items: TTS default, retiring superseded toolsets |
 | [coordination.md](coordination.md) | This project's handle (`@arcana`), arcana-ai's consumers, and the peers on the bus |
 | [services.md](services.md) | Who supplies services: owners, not the daemon; what's decided and what's still open |
 | [registration.md](registration.md) | Handles, owner tokens, presence and the session hooks (0.32.0) |
