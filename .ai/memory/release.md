@@ -14,8 +14,11 @@
   which builds the .deb and Arch packages **from the tag**: a packaging fix
   committed after tagging doesn't reach that release. Cut a new patch
   version instead.
-- Installing on an Arch machine: `pacman -U` the release's
-  `.pkg.tar.zst`, run `arcana setup`, restart the `arcana` service.
+- Installing on an Arch machine: `just install-pkg` (builds from the tag
+  with makepkg, installs, restarts the service; needs sudo), or `pacman -U`
+  the release's `.pkg.tar.zst`. Run `arcana setup` only when the hooks
+  changed. Restarting the daemon drops every bridge's connection; bridges
+  from 0.32.2 on reconnect by themselves.
 - `bin/arcana.cr` builds tool schemas from `JSON.parse(%(...))` literals
   that only run when the matching provider key is set, so no spec used to
   load them; 0.31.0 and 0.31.1 crashed at startup with `OPENAI_API_KEY` set.
