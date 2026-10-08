@@ -558,15 +558,30 @@ module Arcana
     end
 
     private def http_get(path : String) : String
-      response = @http_mutex.synchronize { @http.get(path, headers: auth_headers) }
-      response.body
+      request { @http.get(path, headers: auth_headers) }.body
     end
 
     private def http_post(path : String, body : String) : String
       headers = auth_headers
       headers["Content-Type"] = "application/json"
-      response = @http_mutex.synchronize { @http.post(path, headers: headers, body: body) }
-      response.body
+      request { @http.post(path, headers: headers, body: body) }.body
+    end
+
+    # One request on the keep-alive connection. When the daemon restarts,
+    # that connection dies, and HTTP::Client doesn't always drop it: if it
+    # decides not to retry, it raises and keeps the dead socket, so every
+    # later call fails too. Close it, so the next try reconnects, and try
+    # once more. The daemon that held the old socket is gone, so the
+    # request didn't reach anything that could act on it.
+    private def request(& : -> HTTP::Client::Response) : HTTP::Client::Response
+      @http_mutex.synchronize do
+        begin
+          yield
+        rescue IO::Error
+          @http.close
+          yield
+        end
+      end
     end
 
     private def auth_headers : HTTP::Headers

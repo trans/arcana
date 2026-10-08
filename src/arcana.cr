@@ -17,5 +17,5 @@ require "./arcana/db/migrate"
 require "./arcana/auth"
 
 module Arcana
-  VERSION = "0.32.1"
+  VERSION = "0.32.2"
 end

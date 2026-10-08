@@ -1,3 +1,14 @@
+arcana (0.32.2-1) unstable; urgency=medium
+
+  * Fix: after the daemon restarted, every running agent's arcana MCP tools
+    failed ("Unexpected end of http response", then "Broken pipe" on every
+    call) until the agent's session restarted. The bridge kept reusing the
+    dead keep-alive connection: HTTP::Client retries a stale connection
+    only for some requests, and when it doesn't, it keeps the dead socket.
+    The bridge now closes it and retries once.
+
+ -- trans <transfire@gmail.com>  Thu, 08 Oct 2026 12:00:00 +0000
+
 arcana (0.32.1-1) unstable; urgency=medium
 
   * Fix: a project that got `.ai/` after its first registration lost its
