@@ -216,7 +216,7 @@ describe Arcana::Hook do
     end
   end
 
-  it "session-end moves unread mail to .ai/inbox and marks the handle offline" do
+  it "session-end moves unread mail to .ai/mail/inbox and marks the handle offline" do
     with_clean_env do
       with_bus(14614) do |directory|
         project(CONFIG) do |dir|
@@ -225,13 +225,13 @@ describe Arcana::Hook do
 
           hook(14614, dir, "session-end", "--agent", "claude")[0].should eq(0)
 
-          notes = Dir.glob(File.join(dir, ".ai", "inbox", "*.md"))
+          notes = Dir.glob(File.join(dir, ".ai", "mail", "inbox", "*.md"))
           notes.size.should eq(1)
-          File.basename(notes[0]).should contain("-arcana-sender-")
+          File.basename(notes[0]).should start_with("@sender--")
           note = File.read(notes[0])
-          note.should start_with("# Release notes\n")
-          note.should contain("- **From:** @sender")
-          note.should contain("Shipped 0.32.")
+          note.should start_with("From: @sender\n")
+          note.should contain("Subject: Release notes\n")
+          note.should contain("\n\nShipped 0.32.\n")
           note.should contain(%("reply_to": "@sender"))
 
           directory.online?("@proj").should be_false
@@ -248,7 +248,7 @@ describe Arcana::Hook do
           hook(14615, dir, "session-start")
           send_mail(14615, "@proj", "hi", {text: "hello"})
           hook(14615, dir, "session-end", payload: {"reason" => JSON::Any.new("clear")})
-          Dir.glob(File.join(dir, ".ai", "inbox", "*.md")).should be_empty
+          Dir.glob(File.join(dir, ".ai", "mail", "inbox", "*.md")).should be_empty
           directory.online?("@proj").should be_true
         end
       end

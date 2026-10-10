@@ -12,8 +12,8 @@ module Arcana
   #   context, who it is on the bus and that a "held" handle is its own.
   # - `stop`: asks the agent to read waiting mail before it stops, once
   #   per change in the count.
-  # - `session-end`: moves unread mail into `.ai/inbox/` as notes (when the
-  #   project has `.ai/`), then marks the handle offline. The handle stays
+  # - `session-end`: moves unread mail into `.ai/mail/inbox/` as notes (when
+  #   the project has `.ai/`), then marks the handle offline. The handle stays
   #   registered, so mail sent between sessions waits for the next agent.
   #
   # A hook must never break the session: a bus that is down, or any other
@@ -169,19 +169,22 @@ module Arcana
       0
     end
 
-    # Move unread mail into `.ai/inbox/`, one note per message. Returns
-    # the paths written.
+    # Move unread mail into `.ai/mail/inbox/`, one note per message (see the
+    # dot-ai skill's mail conventions). Returns the paths written.
     def self.drain(bus : Rest, cfg : AgentConfig) : Array(String)
       status, body = bus.post("/receive", {address: cfg.handle})
       return [] of String unless status == 200 && body
       messages = body.as_a? || return [] of String
       return [] of String if messages.empty?
 
-      inbox = File.join(cfg.project_dir, ".ai", "inbox")
+      inbox = File.join(cfg.project_dir, ".ai", "mail", "inbox")
       Dir.mkdir_p(inbox)
       messages.map { |env| write_note(inbox, env) }
     end
 
+    # A mail file: header lines, a blank line, then the message. Named by
+    # the sender, `<handle>--<YYYY-MM-DD-HHMMSS>-<id>.md`, as outbound mail
+    # is named by its recipient.
     def self.write_note(inbox : String, env : JSON::Any) : String
       from = env["from"]?.try(&.as_s?) || "unknown"
       to = env["to"]?.try(&.as_s?) || ""
@@ -192,20 +195,20 @@ module Arcana
 
       text, rest = split_payload(env["payload"]?)
       note = String.build do |io|
-        io << "# " << (subject || "Arcana message from #{from}") << "\n\n"
-        io << "- **From:** " << from << "\n"
-        io << "- **To:** " << to << "\n" unless to.empty?
-        io << "- **Sent:** " << (sent || time.to_rfc3339) << "\n"
-        io << "- **Arcana correlation id:** " << id << "\n"
-        io << "- Unread when the session ended, so the session-end hook moved it here from the Arcana bus.\n"
+        io << "From: " << from << "\n"
+        io << "To: " << to << "\n" unless to.empty?
+        io << "Sent: " << (sent || time.to_rfc3339) << "\n"
+        io << "Subject: " << subject << "\n" if subject
+        io << "Id: " << id << "\n"
+        io << "Via: arcana, unread when the session ended\n"
         io << "\n" << text.strip << "\n" if text
         if rest
           io << "\n```json\n" << rest.to_pretty_json << "\n```\n"
         end
       end
 
-      slug = from.lchop('@').gsub(/[^a-zA-Z0-9-]+/, "-").strip('-')
-      path = File.join(inbox, "#{time.to_s("%Y-%m-%d-%H%M%S")}-arcana-#{slug}-#{id[0, 8]}.md")
+      sender = from.gsub(/[^@a-zA-Z0-9_-]+/, "-").gsub(/-{2,}/, "-").strip('-')
+      path = File.join(inbox, "#{sender}--#{time.to_s("%Y-%m-%d-%H%M%S")}-#{id[0, 8]}.md")
       tmp = "#{path}.tmp"
       File.write(tmp, note)
       File.rename(tmp, path)
