@@ -1,3 +1,18 @@
+arcana (0.33.0-1) unstable; urgency=medium
+
+  * Services handle requests concurrently (arcana-core 0.17.1): every
+    Toolset and Service, the daemon's own included, runs each request in
+    its own fiber, at most 8 at once by default. Before, a service took one
+    request at a time, so its throughput was 1 / handler latency.
+  * The session-end hook writes unread mail to `.ai/mail/inbox/` as mail
+    files (header lines, a blank line, the message), named by sender, per
+    the current dot-ai conventions. It used to write `.ai/inbox/`.
+  * This repository's own `.ai/` moved to an orphan `ai` branch, checked
+    out as a worktree (`git worktree add .ai ai`).
+  * Depends on arcana-core ~> 0.17.1.
+
+ -- trans <transfire@gmail.com>  Sun, 11 Oct 2026 12:00:00 +0000
+
 arcana (0.32.2-1) unstable; urgency=medium
 
   * Fix: after the daemon restarted, every running agent's arcana MCP tools

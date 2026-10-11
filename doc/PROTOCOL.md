@@ -247,6 +247,15 @@ Honest assessment.
 
 ### What is guarded
 
+- **Concurrent requests, capped.** A `Service` or `Toolset` runs each
+  request in its own fiber, at most `max_concurrent` at once (default 8,
+  `nil` for no cap; since arcana-core 0.17.0). Before that a service took
+  one request at a time, so its throughput was 1 / handler latency. The
+  cap protects the backend handlers call; set it to what that backend
+  takes. Over a `Client`, waiting requests queue in fibers so the socket
+  keeps reading; in-process, the mailbox reader stops at the cap and the
+  rest wait in the bounded mailbox. `busy` means at least one request is
+  in flight.
 - **Poison-pill payload survival.** `Service#handle` and
   `Toolset#dispatch` both have outer rescues. A bad payload replies
   with `Protocol.error` and the consumer fiber keeps going. One bad
