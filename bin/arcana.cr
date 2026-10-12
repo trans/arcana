@@ -454,6 +454,7 @@ if runware_key = ENV["RUNWARE_API_KEY"]?
     name: "Runware",
     description: "Runware provider — image generation with FLUX models.",
     tags: ["runware", "flux", "generation"],
+    max_concurrent: 3, # Runware asks for 2-4 concurrent requests
   )
 
   image_schema = JSON.parse(%({"type":"object","properties":{"prompt":{"type":"string","description":"Image description"},"output_path":{"type":"string","description":"File path for output image"},"width":{"type":"integer","description":"Width in pixels (default: 1024, auto-snapped to FLUX sizes)"},"height":{"type":"integer","description":"Height in pixels (default: 1024)"},"format":{"type":"string","description":"Output format: WEBP (default), PNG"},"enhance_prompt":{"type":"boolean","description":"Let provider rewrite prompt (default: false)"}},"required":["prompt","output_path"]}))
