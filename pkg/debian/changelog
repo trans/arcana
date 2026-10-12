@@ -1,3 +1,16 @@
+arcana (0.34.0-1) unstable; urgency=medium
+
+  * arcana-core 0.18.0: service owners get lanes (a cap per backend for a
+    toolset in front of several) and `ctx.exclusive` (one block at a time
+    per key, for state handlers share). The daemon's own toolsets each
+    front one backend and share no state, so they need neither.
+  * The daemon's `runware` toolset runs at most 3 requests at once, as
+    Runware asks for 2-4.
+  * doc/PROTOCOL.md describes lanes and exclusive.
+  * Depends on arcana-core ~> 0.18.0.
+
+ -- trans <transfire@gmail.com>  Sun, 11 Oct 2026 12:00:00 +0000
+
 arcana (0.33.0-1) unstable; urgency=medium
 
   * Services handle requests concurrently (arcana-core 0.17.1): every

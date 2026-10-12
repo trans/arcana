@@ -255,7 +255,11 @@ Honest assessment.
   takes. Over a `Client`, waiting requests queue in fibers so the socket
   keeps reading; in-process, the mailbox reader stops at the cap and the
   rest wait in the bounded mailbox. `busy` means at least one request is
-  in flight.
+  in flight. Since arcana-core 0.18.0, a toolset in front of several
+  backends can give each a **lane** with its own cap (a request waits for
+  its lane before taking a toolset slot, so a busy backend holds up no
+  one else), and handlers guard shared state with
+  `ctx.exclusive(:key) { ... }`, which serializes only that block.
 - **Poison-pill payload survival.** `Service#handle` and
   `Toolset#dispatch` both have outer rescues. A bad payload replies
   with `Protocol.error` and the consumer fiber keeps going. One bad
