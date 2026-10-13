@@ -259,7 +259,13 @@ arcana_ts.start
 # categories for every provider (absent when the provider reported none),
 # and `cost` in USD at the provider's list price, or `unpriced` saying
 # why it can't be priced.
+#
+# The old counts (`prompt_tokens`, `completion_tokens`, `reasoning_tokens`,
+# `total_tokens`) are deprecated, and the reply says so; they go away in
+# 0.36.0 with arcana-ai 0.6.0.
 def add_cost(reply : Hash(String, JSON::Any), result : Arcana::AI::Chat::Response | Arcana::AI::Embed::Result) : Nil
+  old = result.is_a?(Arcana::AI::Embed::Result) ? "total_tokens is deprecated and goes" : "prompt_tokens, completion_tokens and reasoning_tokens are deprecated and go"
+  reply["deprecated"] = JSON::Any.new("#{old} away in arcana 0.36.0: use usage, the same for every provider, and cost")
   if usage = result.usage
     reply["usage"] = JSON.parse(usage.to_json)
   end
@@ -288,7 +294,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
   chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini). For reasoning: o1, o3, o4-mini, etc."},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150). For reasoning models, this is the max_completion_tokens cap."},"thinking":{"description":"Enable reasoning. `true` uses defaults; `{effort: 'low'|'medium'|'high'}` controls the tier. Requires an o-series model (o1, o3, o4-mini). Response includes reasoning_tokens count; OpenAI does not surface the reasoning text."}},"required":["messages"]}))
 
   openai_ts.tool("chat",
-    "Chat completion. Send messages array; get content, model, finish_reason, token usage and cost (USD, list price) back. Optional `thinking: true` for reasoning models.",
+    "Chat completion. Send messages array; get content, model, finish_reason, token usage and cost (USD, list price) back (prompt_tokens/completion_tokens are deprecated). Optional `thinking: true` for reasoning models.",
     input_schema: chat_openai_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
@@ -305,10 +311,10 @@ if openai_key = ENV["OPENAI_API_KEY"]?
       "content"           => JSON::Any.new(response.content || ""),
       "model"             => JSON::Any.new(response.model),
       "finish_reason"     => JSON::Any.new(response.finish_reason || ""),
-      "prompt_tokens"     => JSON::Any.new(response.prompt_tokens || 0),
-      "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
+      "prompt_tokens"     => JSON::Any.new(response.@prompt_tokens || 0),
+      "completion_tokens" => JSON::Any.new(response.@completion_tokens || 0),
     } of String => JSON::Any
-    if rt = response.reasoning_tokens
+    if rt = response.@reasoning_tokens
       h["reasoning_tokens"] = JSON::Any.new(rt)
     end
     add_cost(h, response)
@@ -318,7 +324,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
   embed_schema = JSON.parse(%({"type":"object","properties":{"texts":{"type":"array","items":{"type":"string"},"description":"Texts to embed"},"model":{"type":"string","description":"Model (default: text-embedding-3-small)"}},"required":["texts"]}))
 
   openai_ts.tool("embed",
-    "Generate text embedding vectors for an array of texts. Replies with token usage and cost (USD, list price).",
+    "Generate text embedding vectors for an array of texts. Replies with token usage and cost (USD, list price); total_tokens is deprecated.",
     input_schema: embed_schema) do |data|
     texts = data["texts"].as_a.map(&.as_s)
     request = Arcana::AI::Embed::Request.new(texts: texts, model: data.str("model"))
@@ -326,7 +332,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     h = {
       "embeddings"   => JSON::Any.new(result.embeddings.map { |e| JSON::Any.new(e.map { |v| JSON::Any.new(v) }) }),
       "dimensions"   => JSON::Any.new(result.dimensions),
-      "total_tokens" => JSON::Any.new(result.total_tokens),
+      "total_tokens" => JSON::Any.new(result.@total_tokens),
     } of String => JSON::Any
     add_cost(h, result)
     JSON::Any.new(h)
@@ -385,7 +391,7 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
   chat_anthropic_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: claude-sonnet-5-5)"},"temperature":{"type":"number","description":"Sampling temperature (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"web_search":{"type":"boolean","description":"If true, Claude can search the web during its response. The model decides when/whether. Default: false."},"thinking":{"description":"Enable extended thinking. `true` uses defaults (budget: 1024); `{budget: N}` sets the thinking token budget (must be less than max_tokens). Response includes thinking_content with the reasoning text."}},"required":["messages"]}))
 
   anthropic_ts.tool("chat",
-    "Chat completion via Claude. Optional web_search:true lets the model browse. Optional thinking:true enables extended thinking. Replies with token usage and cost (USD, list price).",
+    "Chat completion via Claude. Optional web_search:true lets the model browse. Optional thinking:true enables extended thinking. Replies with token usage and cost (USD, list price); prompt_tokens/completion_tokens are deprecated.",
     input_schema: chat_anthropic_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
@@ -407,8 +413,8 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
       "content"           => JSON::Any.new(response.content || ""),
       "model"             => JSON::Any.new(response.model),
       "finish_reason"     => JSON::Any.new(response.finish_reason || ""),
-      "prompt_tokens"     => JSON::Any.new(response.prompt_tokens || 0),
-      "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
+      "prompt_tokens"     => JSON::Any.new(response.@prompt_tokens || 0),
+      "completion_tokens" => JSON::Any.new(response.@completion_tokens || 0),
     } of String => JSON::Any
     if tc = response.thinking_content
       h["thinking_content"] = JSON::Any.new(tc)
@@ -434,7 +440,7 @@ if google_key = ENV["GOOGLE_API_KEY"]?
   chat_gemini_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: gemini-2.5-flash)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"thinking":{"description":"Enable thinking (Gemini 2.5 series). `true` uses defaults; `{budget: N, include_thoughts: bool}` controls the budget and whether the model surfaces its thoughts. Response includes thinking_content when include_thoughts is true, and reasoning_tokens either way."}},"required":["messages"]}))
 
   gemini_ts.tool("chat",
-    "Chat completion via Gemini. System messages become systemInstruction. Optional thinking:true for 2.5 series reasoning. Replies with token usage and cost (USD, list price).",
+    "Chat completion via Gemini. System messages become systemInstruction. Optional thinking:true for 2.5 series reasoning. Replies with token usage and cost (USD, list price); prompt_tokens/completion_tokens are deprecated.",
     input_schema: chat_gemini_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
@@ -451,13 +457,13 @@ if google_key = ENV["GOOGLE_API_KEY"]?
       "content"           => JSON::Any.new(response.content || ""),
       "model"             => JSON::Any.new(response.model),
       "finish_reason"     => JSON::Any.new(response.finish_reason || ""),
-      "prompt_tokens"     => JSON::Any.new(response.prompt_tokens || 0),
-      "completion_tokens" => JSON::Any.new(response.completion_tokens || 0),
+      "prompt_tokens"     => JSON::Any.new(response.@prompt_tokens || 0),
+      "completion_tokens" => JSON::Any.new(response.@completion_tokens || 0),
     } of String => JSON::Any
     if tc = response.thinking_content
       h["thinking_content"] = JSON::Any.new(tc)
     end
-    if rt = response.reasoning_tokens
+    if rt = response.@reasoning_tokens
       h["reasoning_tokens"] = JSON::Any.new(rt)
     end
     add_cost(h, response)

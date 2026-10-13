@@ -170,8 +170,8 @@ ctx.cancel
 - `content` — the model's text reply (nil when it only made tool calls)
 - `tool_calls` — array of `ToolCall` structs
 - `finish_reason` — `"stop"`, `"tool_calls"`, `"length"`, etc.
-- `prompt_tokens` / `completion_tokens` — token usage
-- `cache_read_tokens` / `cache_creation_tokens` — Anthropic prompt caching
+- `usage` — token counts, in the same categories for every provider
+- `cost` — what the call cost at the provider's list price (see arcana-ai's README)
 - `server_tool_results` — server-side tool output blocks
 - `raw_request` / `raw_json` — full wire-level data for debugging
 
