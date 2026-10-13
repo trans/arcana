@@ -1,3 +1,18 @@
+arcana (0.35.0-1) unstable; urgency=medium
+
+  * arcana-ai 0.5.1: normalized usage and list-price costs for every call;
+    the anthropic chat tool's default model is claude-sonnet-5-5 (the old
+    default was retired on 2026-06-15).
+  * The chat and embed tools reply with `usage` (the same categories for
+    every provider) and `cost` in USD at list price, or `unpriced` saying
+    why there's none.
+  * prompt_tokens, completion_tokens, reasoning_tokens and total_tokens in
+    those replies are deprecated: each reply says so, and they go away in
+    0.36.0.
+  * Depends on arcana-ai ~> 0.5.1.
+
+ -- trans <transfire@gmail.com>  Tue, 13 Oct 2026 12:00:00 +0000
+
 arcana (0.34.0-1) unstable; urgency=medium
 
   * arcana-core 0.18.0: service owners get lanes (a cap per backend for a
