@@ -294,7 +294,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     tags: ["llm", "openai"],
   )
 
-  chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini). For reasoning: o1, o3, o4-mini, etc."},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150). For reasoning models, this is the max_completion_tokens cap."},"thinking":{"description":"Enable reasoning. `true` uses defaults; `{effort: 'low'|'medium'|'high'}` controls the tier. Requires an o-series model (o1, o3, o4-mini). Response includes reasoning_tokens count; OpenAI does not surface the reasoning text."}},"required":["messages"]}))
+  chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini). Reasoning models: the o-series, and gpt-5 and later."},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0. GPT-4 and GPT-3.5 models default to 0.7; newer models use their own default and most reject any other value."},"max_tokens":{"type":"integer","description":"Maximum response tokens, reasoning included (default: 4096)."},"thinking":{"description":"Enable reasoning. `true` uses defaults; `{effort: 'low'|'medium'|'high'}` controls the tier. Requires a reasoning model (the o-series, gpt-5 and later). Response includes reasoning_tokens count; OpenAI does not surface the reasoning text."}},"required":["messages"]}))
 
   openai_ts.tool("chat",
     "Chat completion. Send messages array; get content, model, finish_reason, token usage and cost (USD, list price) back (prompt_tokens/completion_tokens are deprecated). Optional `thinking: true` for reasoning models.",
@@ -306,7 +306,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
       messages: msgs,
       model: data.str("model"),
       temperature: data.float("temperature", 0.7),
-      max_tokens: data.int("max_tokens", 150),
+      max_tokens: data.int("max_tokens", 4096),
       thinking: Arcana::AI::Chat::ThinkingConfig.from_json(data["thinking"]?),
     )
     response = chat_openai.complete(request)
