@@ -1,3 +1,16 @@
+arcana (0.35.2-1) unstable; urgency=medium
+
+  * Shared-log topics (arcana-core 0.19.0): a `#topic` registered with
+    kind "topic" is a log everyone reads. Posts are stored once and
+    numbered; `arcana_inbox address:"#topic" after:<seq>` reads them
+    without subscribing or consuming; the directory shows each topic's
+    `last_seq`; subscribers get a short notification of each post. Posts
+    and subscribers survive a restart. New REST endpoints /subscribe,
+    /unsubscribe and /subscriptions; the MCP tools take topics.
+  * Depends on arcana-core ~> 0.19.0.
+
+ -- trans <transfire@gmail.com>  Tue, 13 Oct 2026 21:00:00 +0000
+
 arcana (0.35.1-1) unstable; urgency=medium
 
   * arcana-ai 0.5.3: the openai chat tool works with the o-series and every
