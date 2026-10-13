@@ -160,7 +160,7 @@ module Arcana
         elsif tag = ctx.request.query_params["tag"]?
           ctx.response.print @directory.to_json(@directory.by_tag(tag))
         elsif kind = ctx.request.query_params["kind"]?
-          k = kind == "agent" ? Directory::Kind::Agent : Directory::Kind::Service
+          k = Directory::Kind.from_name?(kind) || Directory::Kind::Service
           ctx.response.print @directory.to_json(@directory.by_kind(k))
         else
           ctx.response.print @directory.to_json
@@ -171,7 +171,8 @@ module Arcana
 
       when {"GET", _}
         if path.starts_with?("/directory/")
-          address = path.lchop("/directory/")
+          # Decoded, since a topic's `#` must be sent as `%23`.
+          address = URI.decode(path.lchop("/directory/"))
           if listing = @directory.lookup(address)
             ctx.response.print @directory.to_json(listing)
           else
@@ -203,6 +204,15 @@ module Arcana
 
       when {"POST", "/publish"}
         handle_post_publish(ctx)
+
+      when {"POST", "/subscribe"}
+        handle_post_subscribe(ctx, subscribe: true)
+
+      when {"POST", "/unsubscribe"}
+        handle_post_subscribe(ctx, subscribe: false)
+
+      when {"POST", "/subscriptions"}
+        handle_post_subscriptions(ctx)
 
       when {"POST", "/inbox"}
         handle_post_inbox(ctx)
@@ -242,11 +252,17 @@ module Arcana
     # so an agent can tell its own registration from someone else's;
     # see `Directory#claim`. The reply carries the listing, including
     # `online`, `last_seen` and `expires_at` for agents.
+    #
+    # A `#topic` gets a log instead of a mailbox; `retention` (a number
+    # of posts, or `{ring: N}`) says how many it keeps.
     private def handle_post_register(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed.str("address")
       raise "address required" if address.empty?
       Directory.validate_address(address)
+      topic = Directory.topic?(address)
+      retention = retention_of(parsed)
+      raise "retention is for topics" if retention && !topic
 
       # An existing mailbox token can only be presented, not replaced:
       # otherwise a registration that fails below would still swap the
@@ -258,27 +274,28 @@ module Arcana
       # that send/subscribe but never accept addressed messages).
       listed = parsed.bool?("listed")
       listed = true if listed.nil?
+      raise "a topic is always listed: that's how readers find it" if topic && !listed
       claim = nil
       if listed
-        kind_str = parsed.str?("kind")
-        kind = case kind_str
-               when "service" then Directory::Kind::Service
-               when "agent"   then Directory::Kind::Agent
-               end
         claim = @directory.claim(Directory::Listing.new(
           address: address,
           name: parsed.str?("name") || address,
           description: parsed.str("description"),
-          kind: kind,
+          kind: Directory::Kind.from_name?(parsed.str?("kind")),
           schema: parsed["schema"]?,
           guide: parsed.str?("guide"),
           tags: parsed.str_arr("tags"),
+          retention: retention,
         ), parsed.str?("owner_token"))
       end
 
-      # Create mailbox (always — sender check requires has_mailbox?)
-      @bus.mailbox(address)
-      @tokens[address] = token if token
+      if topic
+        @bus.topic_log(address)
+      else
+        # Create mailbox (always — sender check requires has_mailbox?)
+        @bus.mailbox(address)
+        @tokens[address] = token if token
+      end
       save_state
 
       ctx.response.print(JSON.build do |j|
@@ -347,8 +364,12 @@ module Arcana
       @directory.check_owner!(address, parsed.str?("owner_token"))
 
       @directory.unregister(address)
-      @bus.remove_mailbox(address)
-      @tokens.delete(address)
+      if Directory.topic?(address)
+        @bus.remove_topic(address)
+      else
+        @bus.remove_mailbox(address)
+        @tokens.delete(address)
+      end
       save_state
 
       ctx.response.print %({"ok":true,"address":"#{address}"})
@@ -363,6 +384,7 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed.str("address")
       raise "address required" if address.empty?
+      return read_topic(ctx, address, parsed) if Directory.topic?(address)
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
 
@@ -377,6 +399,9 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed.str("address")
       raise "address required" if address.empty?
+      if Directory.topic?(address)
+        raise "#{address} is a topic, shared by everyone: read it with inbox and `after` (the last post number you saw). Receiving would take posts away from the others."
+      end
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
 
@@ -496,10 +521,12 @@ module Arcana
       return nil if listings.empty?
 
       # Sigil-aware: `@mj` and `mj` are distinct entities on purpose,
-      # so a typo of `@mj` shouldn't cross-suggest `mj` (or vice versa).
-      # Filter candidates to the same sigil group as the failed address.
-      failed_is_handle = Directory.handle?(addr)
-      listings = listings.select { |l| Directory.handle?(l.address) == failed_is_handle }
+      # so a typo of `@mj` shouldn't cross-suggest `mj` (or vice versa),
+      # and a `#topic` suggests only topics. Filter candidates to the
+      # same sigil group as the failed address.
+      sigil = ->(a : String) { a[0]?.try { |c| c.in?('@', '#') ? c : nil } }
+      failed_sigil = sigil.call(addr)
+      listings = listings.select { |l| sigil.call(l.address) == failed_sigil }
       return nil if listings.empty?
 
       best : Directory::Listing? = nil
@@ -686,6 +713,10 @@ module Arcana
       parsed = JSON.parse(ctx.request.body.not_nil!)
       address = parsed.str("address")
       raise "address required" if address.empty?
+      if Directory.topic?(address)
+        ctx.response.print({address: address, last_seq: @bus.topic_log(address).head}.to_json)
+        return
+      end
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
 
@@ -696,16 +727,107 @@ module Arcana
       ctx.response.print %|{"error":"#{ex.message}"}|
     end
 
+    # Publish to a topic. For a `#topic` the reply carries the post's
+    # number (`seq`) and how many subscribe.
     private def handle_post_publish(ctx : HTTP::Server::Context)
+      topic = ""
+      begin
+        parsed = JSON.parse(ctx.request.body.not_nil!)
+        topic = parsed.str("topic")
+        raise "topic required" if topic.empty?
+        envelope = envelope_from_json(parsed)
+        check_sender!(envelope.from)
+        if seq = @bus.publish(topic, envelope)
+          ctx.response.print({ok: true, topic: topic, seq: seq, correlation_id: envelope.correlation_id, subscribers: @bus.subscribers(topic).size}.to_json)
+        else
+          ctx.response.print %({"ok":true})
+        end
+      rescue ex : Arcana::Error
+        ctx.response.status = HTTP::Status::BAD_REQUEST
+        ctx.response.print error_with_suggestion(topic, ex.message || "publish failed")
+      rescue ex
+        ctx.response.status = HTTP::Status::BAD_REQUEST
+        ctx.response.print({error: ex.message}.to_json)
+      end
+    end
+
+    # Read a `#topic`: the posts after `after` (default 0, from the
+    # oldest kept), at most `limit` (default 100, at most 1000). Reading
+    # consumes nothing. `first_seq` past `after + 1` means posts were
+    # dropped before the reader got to them.
+    private def read_topic(ctx : HTTP::Server::Context, topic : String, parsed : JSON::Any) : Nil
+      log = @bus.topic_log(topic)
+      after = parsed.i64?("after") || 0_i64
+      limit = (parsed.int?("limit") || 100).clamp(0, 1000)
+      posts = log.read(after, limit)
+      ctx.response.print(JSON.build do |j|
+        j.object do
+          j.field "topic", topic
+          j.field "first_seq", log.first
+          j.field "last_seq", log.head
+          j.field "posts" do
+            j.array do
+              posts.each do |post|
+                env = post.envelope
+                j.object do
+                  j.field "seq", post.seq
+                  j.field "from", env.from
+                  j.field "subject", env.subject
+                  j.field "payload", env.payload
+                  j.field "correlation_id", env.correlation_id
+                  j.field "reply_to", env.reply_to if env.reply_to
+                  j.field "timestamp", env.timestamp.to_rfc3339
+                end
+              end
+            end
+          end
+        end
+      end)
+    end
+
+    # Subscribe an address to a topic, or unsubscribe it. Needs the
+    # address's token and owner token when it has them, so nobody signs
+    # up someone else. `cadence` is "always" (the only one so far).
+    private def handle_post_subscribe(ctx : HTTP::Server::Context, subscribe : Bool)
       parsed = JSON.parse(ctx.request.body.not_nil!)
       topic = parsed.str("topic")
-      envelope = envelope_from_json(parsed)
-      check_sender!(envelope.from)
-      @bus.publish(topic, envelope)
-      ctx.response.print %({"ok":true})
+      address = parsed.str("address")
+      raise "topic required" if topic.empty?
+      raise "address required" if address.empty?
+      check_token!(address, parsed)
+      @directory.check_owner!(address, parsed.str?("owner_token"))
+      if subscribe
+        @bus.subscribe(topic, address, parsed.str?("cadence") || "always")
+      else
+        @bus.unsubscribe(topic, address)
+      end
+      save_state if Directory.topic?(topic)
+      ctx.response.print({ok: true, topic: topic, address: address, subscribed: subscribe}.to_json)
+    rescue ex : Directory::HeldError
+      respond_held(ctx, ex)
     rescue ex
-      ctx.response.status = HTTP::Status::BAD_REQUEST
-      ctx.response.print %({"error":"#{ex.message}"})
+      respond_error(ctx, HTTP::Status::BAD_REQUEST, ex.message)
+    end
+
+    # The topics an address subscribes to.
+    private def handle_post_subscriptions(ctx : HTTP::Server::Context)
+      parsed = JSON.parse(ctx.request.body.not_nil!)
+      address = parsed.str("address")
+      raise "address required" if address.empty?
+      ctx.response.print({address: address, topics: @bus.subscriptions(address).sort}.to_json)
+    rescue ex
+      respond_error(ctx, HTTP::Status::BAD_REQUEST, ex.message)
+    end
+
+    # A topic's `retention`: a number of posts, or `{ring: N}`. Nil when
+    # not given.
+    private def retention_of(parsed : JSON::Any) : Int32?
+      raw = parsed["retention"]?
+      return if raw.nil? || raw.raw.nil?
+      n = raw.as_i64? || raw.as_h?.try(&.["ring"]?).try(&.as_i64?)
+      raise "retention must be a number of posts, or {ring: N}" unless n
+      TopicLog.check_retention!(n)
+      n.to_i32
     end
 
     # GET /events?type=...&subject=...&since=<rfc3339>&limit=N
@@ -844,6 +966,7 @@ module Arcana
               raw_addr = parsed.str?("address")
               next unless raw = raw_addr
               Directory.validate_address(raw)
+              raise "#{raw} is a topic, which can't join: register it with POST /register" if Directory.topic?(raw)
 
               # Caller can opt out of directory listing (pure consumers that
               # send/subscribe but never accept addressed messages).

@@ -295,7 +295,7 @@ Arcana::Registry.register_chat("custom") { |config| MyProvider.new(config) }
 ## Agent Communication Bus
 
 Agents and services communicate via the Bus with direct messaging,
-pub/sub fan-out, and request/response patterns.
+shared-log topics, and request/response patterns.
 
 ```crystal
 bus = Arcana::Bus.new
@@ -314,10 +314,38 @@ bus.deliver(envelope)                                    # auto (default)
 reply, _ = bus.deliver(envelope, timeout: 5.seconds)     # sync with timeout
 bus.send(envelope)                                       # direct async
 
-# Pub/sub
-bus.subscribe("image:ready", "writer")
-bus.publish("image:ready", envelope)
+# Topics: a registered `#topic` is a log everyone reads
+dir.register(Arcana::Directory::Listing.new("#releases", "Releases", "", kind: :topic))
+seq = bus.publish("#releases", envelope)          # stored once, numbered
+bus.topic_log("#releases").read(after: last_read)  # anyone reads, nothing consumed
+bus.subscribe("#releases", "writer")               # optional notifications
 ```
+
+### Topics
+
+A `#topic` is a log that everyone on the bus shares, instead of a copy in
+each subscriber's mailbox:
+
+- **Publishing** stores a post once and numbers it (`seq`, from 1).
+- **Reading** takes the posts after a number, with
+  `arcana_inbox address:"#releases" after:<seq>`. It needs no
+  subscription and consumes nothing, so an agent that was away catches up
+  from the log.
+- **The directory** shows each topic's `last_seq` and
+  `last_published_at`, so an agent can see that something is new without
+  subscribing.
+- **Subscribing** is optional. It puts a short notification of each post
+  in the subscriber's mailbox, sent from the topic, with the post's
+  subject and its `seq`. That's useful when an agent shouldn't have to
+  remember to check, or is waiting on `arcana_receive`.
+- **Registration** comes first: a topic is registered with kind `topic`.
+  Posting to an unregistered topic fails, so a typo can't vanish.
+- **Retention:** a topic keeps its newest `retention` posts (10,000 by
+  default, 100,000 at most).
+- **Restarts:** posts, numbering and subscriptions survive a restart.
+
+Topic names without `#` keep the older fan-out: each subscriber gets a
+full copy, nothing is kept, and no registration is needed.
 
 ### Ordering
 
@@ -454,12 +482,14 @@ server.start  # blocking
 - **REST** `GET /directory` — query the directory (supports `?q=`, `?tag=`, `?kind=`)
 - **REST** `GET /directory/:address` — lookup a specific listing
 - **REST** `POST /deliver` — unified send with ordering (auto/sync/async)
-- **REST** `POST /publish` — topic broadcast
-- **REST** `POST /register` — create a mailbox + directory listing
+- **REST** `POST /publish` — post to a topic (a `#topic` replies with the post's `seq`)
+- **REST** `POST /subscribe`, `POST /unsubscribe` — topic notifications (`topic`, `address`)
+- **REST** `POST /subscriptions` — the topics an address subscribes to
+- **REST** `POST /register` — create a mailbox + directory listing (a `#topic` with `kind: "topic"` gets a log, and an optional `retention`)
 - **REST** `POST /unregister` — remove a mailbox + listing
 - **REST** `POST /busy` — update busy/idle status
-- **REST** `POST /inbox` — non-destructive message listing
-- **REST** `POST /receive` — consume messages (supports selective by id + timeout)
+- **REST** `POST /inbox` — non-destructive message listing; for a `#topic`, its posts `after` a number (and `limit`)
+- **REST** `POST /receive` — consume messages (supports selective by id + timeout; not for topics)
 - **REST** `POST /outstanding` — check expected response count
 - **REST** `POST /await` — block until all expectations met
 - **REST** `POST /freeze` — freeze a message by id
@@ -482,19 +512,20 @@ Connects Claude Code (or any MCP client) to the Arcana bus via stdio:
 }
 ```
 
-**9 tools:**
+**10 tools:**
 
 | Tool | Description |
 |---|---|
-| `arcana_directory` | Search/filter/lookup directory listings |
+| `arcana_directory` | Search/filter/lookup directory listings (agents, services, topics) |
 | `arcana_deliver` | Unified send with ordering (auto/sync/async) |
-| `arcana_publish` | Broadcast to topic subscribers |
-| `arcana_register` | Register/unregister/busy/idle (merged) |
-| `arcana_inbox` | Non-destructive message listing |
+| `arcana_publish` | Post to a topic |
+| `arcana_register` | Register/unregister/busy/idle, and subscribe/unsubscribe/subscriptions for topics |
+| `arcana_inbox` | Non-destructive message listing, or a topic's posts after a number |
 | `arcana_receive` | Consume messages (selective by id, with timeout) |
 | `arcana_expect` | Check/await outstanding response expectations |
 | `arcana_freeze` | Freeze/thaw/thaw_all/list frozen messages |
 | `arcana_health` | Server health check |
+| `arcana_events` | Query the audit event log |
 
 ## Running
 

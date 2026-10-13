@@ -32,6 +32,7 @@ module Arcana
           - `foo` — bare single token (typically a service or Toolset)
           - `@foo` — agent-handle single token (leading `@` sigil,
             conversational identity)
+          - `#foo`, `#foo.bar` — a topic: a shared log (see Topics)
           - `owner:capability` — two-token colon form (legacy convention;
             still valid, but Toolset is preferred for grouping tools
             under one owner)
@@ -64,6 +65,19 @@ module Arcana
         `runware` (image).
         MD
 
+      "topics" => <<-MD,
+        **Topics:** a `#topic` is a log everyone shares: a post is stored
+        once and numbered, and anyone reads it without subscribing.
+        - Create: `arcana_register address:"#releases" kind:"topic"`.
+        - Post: `arcana_publish topic:"#releases"`; the reply has its `seq`.
+        - Read: `arcana_inbox address:"#releases" after:<last seq read>`.
+          Reading consumes nothing.
+        - See what's new: the topic's directory listing has `last_seq`.
+        - Subscribe (optional): `arcana_register action:"subscribe"
+          topic:"#releases"` puts a short notification in your mailbox
+          for each post, from the topic, with its `seq`.
+        MD
+
       "errors" => <<-MD,
         **Errors:** if a delivery fails ("no mailbox for address"), the
         error response includes a `did_you_mean` field with the closest
@@ -80,6 +94,7 @@ module Arcana
       #{TOPICS["workflow"]}
       #{TOPICS["addressing"]}
       #{TOPICS["discovery"]}
+      #{TOPICS["topics"]}
       #{TOPICS["errors"]}
       MD
 

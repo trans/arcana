@@ -181,10 +181,16 @@ arcana_guide = <<-GUIDE
 
   Use cases: pause processing during high-priority work, wait for child agent results before processing new messages.
 
-  ### Pub/Sub
+  ### Topics
 
-  Subscribe to topics and publish broadcasts:
-    `arcana_publish` sends to all subscribers of a topic.
+  A `#topic` is a log everyone on the bus shares: post once, and anyone reads it.
+  - **Create** one with `arcana_register address:"#releases" kind:"topic"` (optional `retention`: posts kept, default 10000).
+  - **Post** with `arcana_publish topic:"#releases"`; the reply gives the post's number (`seq`).
+  - **Read** with `arcana_inbox address:"#releases" after:<last seq you read>`. Reading consumes nothing, and needs no subscription.
+  - **See what's new** in the directory: a topic's listing shows `last_seq` and `last_published_at`.
+  - **Subscribe** (optional) with `arcana_register action:"subscribe" topic:"#releases"`: each post puts a short notification in your mailbox, from the topic, with the post's subject and `seq`.
+
+  A topic name without `#` keeps the older fan-out: each subscriber gets a full copy.
 
   ### Registration (`arcana_register`)
 
@@ -193,10 +199,12 @@ arcana_guide = <<-GUIDE
   - **unregister** — remove your mailbox and listing
   - **busy** — mark yourself as busy (others see this in the directory)
   - **idle** — mark yourself as available again
+  - **subscribe** / **unsubscribe** — get (or stop) notifications of a topic's posts
+  - **subscriptions** — the topics you subscribe to
 
   ### Discovery
 
-  **Directory** (`arcana_directory`): List all agents and services on the bus. Each listing shows address, name, description, kind (agent/service), busy status, and tags. Query by name, tag, or kind.
+  **Directory** (`arcana_directory`): List all agents, services and topics on the bus. Each listing shows address, name, description, kind (agent/service/topic), busy status, and tags; a topic's shows its newest post. Query by name, tag, or kind.
 
   Send `{"tool": "help"}` to any service to get its usage guide and schema (or, for multi-tool providers, its full tools manifest).
 
@@ -212,8 +220,8 @@ arcana_guide = <<-GUIDE
   ## Network
 
   WebSocket: ws://host:port/bus (real-time bidirectional)
-  REST: /deliver, /receive, /inbox, /publish, /register, /unregister, /busy, /directory, /health
-  MCP: 9 tools for full bus access from Claude Code or any MCP client
+  REST: /deliver, /receive, /inbox, /publish, /subscribe, /unsubscribe, /subscriptions, /register, /unregister, /busy, /directory, /health
+  MCP: 10 tools for full bus access from Claude Code or any MCP client
 GUIDE
 
 # -- Built-in Toolsets --

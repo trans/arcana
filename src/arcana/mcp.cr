@@ -26,13 +26,13 @@ module Arcana
     TOOLS = [
       {
         name:        "arcana_directory",
-        description: "List or search the Arcana service directory. Returns agents and services registered on the bus.",
+        description: "List or search the Arcana service directory. Returns agents, services and topics registered on the bus. A topic's listing shows `last_seq` (its newest post's number) and `last_published_at`: compare them with the last post you read to see whether there's anything new.",
         inputSchema: {
           type:       "object",
           properties: {
             query:   {type: "string", description: "Search query (matches name, description, tags)"},
             tag:     {type: "string", description: "Filter by tag. Providers auto-tag their tool names, so `tag: \"chat\"` finds every entity that offers a chat tool."},
-            kind:    {type: "string", enum: ["agent", "service"], description: "Filter by kind"},
+            kind:    {type: "string", enum: ["agent", "service", "topic"], description: "Filter by kind"},
             address: {type: "string", description: "Look up a specific address"},
           },
         },
@@ -55,29 +55,33 @@ module Arcana
       },
       {
         name:        "arcana_publish",
-        description: "Publish a message to a topic on the Arcana bus. All subscribers receive a copy.",
+        description: "Post to a topic on the Arcana bus. A `#topic` (registered with arcana_register kind \"topic\") is a shared log: the post is stored once and numbered, anyone reads it with arcana_inbox, and subscribers get a short notification. The reply gives the post's number (`seq`). A topic name without `#` sends every subscriber a full copy instead.",
         inputSchema: {
           type:       "object",
           properties: {
-            topic:   {type: "string", description: "Topic to publish to"},
-            subject: {type: "string", description: "Message subject"},
-            payload: {description: "Message payload (any JSON value)"},
+            topic:   {type: "string", description: "Topic to post to, e.g. `#releases`"},
+            from:    {type: "string", description: "Your address on the bus. Defaults to this project's handle."},
+            subject: {type: "string", description: "What the post is about: subscribers see it in their notification"},
+            payload: {description: "The post (any JSON value)"},
           },
           required: ["topic"],
         },
       },
       {
         name:        "arcana_register",
-        description: "Register or unregister on the Arcana bus. Default action is 'register' which creates a mailbox and optionally adds a directory listing. Use action 'unregister' to remove your mailbox and listing. Use action 'busy' or 'idle' to update your availability status. In a project with a session hook, you are usually registered already: registering your own handle again just refreshes your listing (status \"yours\"), and this bridge supplies the project's owner token for it.",
+        description: "Register or unregister on the Arcana bus. Default action is 'register' which creates a mailbox and optionally adds a directory listing. Use action 'unregister' to remove your mailbox and listing. Use action 'busy' or 'idle' to update your availability status. In a project with a session hook, you are usually registered already: registering your own handle again just refreshes your listing (status \"yours\"), and this bridge supplies the project's owner token for it. To create a topic, register its `#name` with kind \"topic\" (and optionally `retention`). Action 'subscribe' (with `topic`) puts a short notification in your mailbox for each new post; 'unsubscribe' stops them; 'subscriptions' lists your topics. You don't need to subscribe to read a topic: see arcana_inbox.",
         inputSchema: {
           type:       "object",
           properties: {
-            address:     {type: "string", description: "Your routing address on the bus. Legal shapes: `foo` (bare token, typically a service), `@foo` (agent handle — leading `@` sigil, for conversational identities like a project's Claude agent), or `owner:capability` (two-token colon form for services). Pick something stable; other agents will remember it. `@mj` and `mj` are distinct entities — the sigil lets Claude/Codex register alongside a same-project tool service without colliding."},
-            action:      {type: "string", enum: ["register", "unregister", "busy", "idle"], description: "Action to perform (default: register)"},
+            address:     {type: "string", description: "Your routing address on the bus. Legal shapes: `foo` (bare token, typically a service), `@foo` (agent handle — leading `@` sigil, for conversational identities like a project's Claude agent), `#foo` or `#foo.bar` (a topic), or `owner:capability` (two-token colon form for services). Pick something stable; other agents will remember it. `@mj` and `mj` are distinct entities — the sigil lets Claude/Codex register alongside a same-project tool service without colliding. For subscribe, unsubscribe and subscriptions: the address that gets the notifications (yours)."},
+            action:      {type: "string", enum: ["register", "unregister", "busy", "idle", "subscribe", "unsubscribe", "subscriptions"], description: "Action to perform (default: register)"},
+            topic:       {type: "string", description: "The `#topic` to subscribe to or unsubscribe from"},
+            cadence:     {type: "string", enum: ["always"], description: "How often to be notified when subscribing: \"always\" (each post, the default and only choice so far)"},
+            retention:   {type: "integer", description: "Topics only: how many posts the topic keeps, newest first (default 10000, at most 100000)"},
             token:       {type: "string", description: "Secret token to protect your mailbox (optional, you choose it)"},
             name:        {type: "string", description: "Display name for the directory"},
             description: {type: "string", description: "What you do (for the directory)"},
-            kind:        {type: "string", enum: ["agent", "service"], description: "What kind of listing this is. Default: agent. Set to 'service' if you handle requests via a fixed schema."},
+            kind:        {type: "string", enum: ["agent", "service", "topic"], description: "What kind of listing this is. Default: agent. Set to 'service' if you handle requests via a fixed schema, or 'topic' for a `#topic`."},
             guide:       {type: "string", description: "How-to guide for interacting with you"},
             tags:        {type: "array", items: {type: "string"}, description: "Tags for discovery"},
             listed:      {type: "boolean", description: "Whether to add a directory listing. Default true. Set false for pure consumers that send/subscribe but don't accept addressed messages — they get a mailbox but stay invisible to discovery."},
@@ -87,19 +91,21 @@ module Arcana
       },
       {
         name:        "arcana_inbox",
-        description: "List messages in your mailbox WITHOUT consuming them. Returns metadata (correlation_id, from, subject, timestamp) for each message. Use this to see what's waiting, then arcana_receive with an id to selectively consume specific messages.",
+        description: "List messages in your mailbox WITHOUT consuming them. Returns metadata (correlation_id, from, subject, timestamp) for each message. Use this to see what's waiting, then arcana_receive with an id to selectively consume specific messages. With a `#topic` as the address, reads the topic instead: its posts numbered after `after`, in full, oldest first, plus `first_seq` and `last_seq`. Anyone can read a topic, and reading consumes nothing. A notification from a topic (`from` starts with `#`) gives the new post's `seq`.",
         inputSchema: {
           type:       "object",
           properties: {
-            address: {type: "string", description: "Your address on the bus"},
+            address: {type: "string", description: "Your address on the bus, or a `#topic` to read"},
             token:   {type: "string", description: "Your mailbox token (if set during register)"},
+            after:   {type: "integer", description: "Topics only: return posts numbered after this (the last one you read). Default 0: from the oldest kept post."},
+            limit:   {type: "integer", description: "Topics only: at most this many posts (default 100, at most 1000)"},
           },
           required: ["address"],
         },
       },
       {
         name:        "arcana_receive",
-        description: "Check your mailbox for incoming messages. Returns an array of envelopes. Use timeout_ms to wait for messages if the mailbox is empty. Use id to selectively receive a specific message (from arcana_inbox) without consuming the rest. Combine id + timeout_ms to block until a specific message arrives.",
+        description: "Check your mailbox for incoming messages. Returns an array of envelopes. Use timeout_ms to wait for messages if the mailbox is empty. Use id to selectively receive a specific message (from arcana_inbox) without consuming the rest. Combine id + timeout_ms to block until a specific message arrives. Not for topics: read those with arcana_inbox.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -288,7 +294,7 @@ module Arcana
 
     private def call_directory(args : JSON::Any) : String
       if address = args.str?("address")
-        http_get("/directory/#{address}")
+        http_get("/directory/#{URI.encode_path_segment(address)}")
       elsif query = args.str?("query")
         http_get("/directory?q=#{URI.encode_path_segment(query)}")
       elsif tag = args.str?("tag")
@@ -352,6 +358,17 @@ module Arcana
         end
 
         result
+      when "subscribe", "unsubscribe"
+        body = {
+          address:     address,
+          topic:       args.str("topic"),
+          cadence:     args.str?("cadence"),
+          token:       args.str?("token"),
+          owner_token: owner_token_for(address),
+        }.to_json
+        http_post("/#{action}", body)
+      when "subscriptions"
+        http_post("/subscriptions", {address: address}.to_json)
       when "busy"
         body = {address: address, token: args.str?("token"), busy: true}.to_json
         http_post("/busy", body)
@@ -368,12 +385,14 @@ module Arcana
           guide:       args.str?("guide"),
           tags:        args["tags"]?,
           listed:      args.bool?("listed"),
+          retention:   args["retention"]?,
           owner_token: owner_token_for(address),
         }.to_json
         result = http_post("/register", body)
 
-        # Track address for resource listing + notify client of new resource
-        unless @registered.includes?(address)
+        # Track address for resource listing + notify client of new
+        # resource. A topic has no mailbox to offer as one.
+        unless @registered.includes?(address) || address.starts_with?('#')
           @registered << address
           emit_notification("notifications/resources/list_changed")
         end
@@ -386,6 +405,8 @@ module Arcana
       body = {
         address: args.str("address"),
         token:   args.str?("token"),
+        after:   args.i64?("after"),
+        limit:   args.int?("limit"),
       }.to_json
       http_post("/inbox", body)
     end

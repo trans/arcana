@@ -4,7 +4,8 @@ module Arcana
   # Shutdown snapshots for crash recovery.
   #
   # Captures the full bus state (directory listings, mailbox messages,
-  # frozen messages, tokens) into a single JSON file. Reloaded at startup
+  # frozen messages, tokens, topics' posts and subscribers) into a single
+  # JSON file. Reloaded at startup
   # to restore everything as it was at last clean shutdown.
   #
   # See `bin/arcana.cr` for the SIGTERM/SIGINT trap that calls `save`,
@@ -52,6 +53,7 @@ module Arcana
                   j.field "schema", l.schema if l.schema
                   j.field "guide", l.guide if l.guide
                   j.field "tags", l.tags unless l.tags.empty?
+                  j.field "retention", l.retention if l.retention
                   if seen = directory.last_seen(l.address)
                     j.field "last_seen", seen.to_rfc3339
                   end
@@ -104,6 +106,28 @@ module Arcana
               end
             end
           end
+          j.field "topics" do
+            j.array do
+              bus.topic_logs.each do |log|
+                snap = log.dump
+                j.object do
+                  j.field "address", log.address
+                  j.field "head", snap[:head]
+                  j.field "subscribers", bus.subscribers(log.address)
+                  j.field "posts" do
+                    j.array do
+                      snap[:posts].each do |post|
+                        j.object do
+                          j.field "seq", post.seq
+                          j.field "envelope" { post.envelope.to_json(j) }
+                        end
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
         end
       end
     end
@@ -120,12 +144,18 @@ module Arcana
       restore_mailboxes(bus, parsed["mailboxes"]?)
       restore_tokens(server, parsed["tokens"]?)
 
-      # Ensure every restored listing has a mailbox. The snapshot omits
-      # empty mailboxes to save space, but the bus needs one to exist for
-      # send() to queue messages for offline agents.
+      # Ensure every restored listing has a mailbox (or, for a topic, a
+      # log). The snapshot omits empty mailboxes to save space, but the
+      # bus needs one to exist for send() to queue messages for offline
+      # agents.
       directory.list.each do |listing|
-        bus.mailbox(listing.address) unless bus.has_mailbox?(listing.address)
+        if listing.kind.topic?
+          bus.topic_log(listing.address)
+        else
+          bus.mailbox(listing.address) unless bus.has_mailbox?(listing.address)
+        end
       end
+      restore_topics(bus, parsed["topics"]?)
 
       true
     end
@@ -146,19 +176,15 @@ module Arcana
         end
         # Restore kind from the snapshot; fall back to the constructor's
         # derivation only if the snapshot predates kind persistence.
-        kind_str = entry.str?("kind")
-        kind = case kind_str
-               when "agent"   then Directory::Kind::Agent
-               when "service" then Directory::Kind::Service
-               end
         listing = Directory::Listing.new(
           address: address,
           name: entry.str?("name") || address,
           description: entry.str("description"),
-          kind: kind,
+          kind: Directory::Kind.from_name?(entry.str?("kind")),
           schema: entry["schema"]?,
           guide: entry.str?("guide"),
           tags: entry.str_arr("tags"),
+          retention: entry.int?("retention"),
         )
         unless directory.lookup(address)
           begin
@@ -213,6 +239,21 @@ module Arcana
           ts = (Time.parse_rfc3339(la_raw) rescue nil)
           mb.last_activity = ts if ts
         end
+      end
+    end
+
+    # A topic's posts and subscribers. Topics whose listing is gone are
+    # skipped.
+    private def self.restore_topics(bus : Bus, raw : JSON::Any?) : Nil
+      return unless raw
+      raw.as_a.each do |entry|
+        address = entry.str("address")
+        log = bus.topic_log(address) rescue next
+        posts = (entry.arr?("posts") || [] of JSON::Any).map do |p|
+          TopicLog::Post.new(p["seq"].as_i64, Envelope.from_json(p["envelope"].to_json))
+        end
+        log.load_snapshot(entry.i64?("head") || 0_i64, posts)
+        bus.restore_subscribers(address, entry.str_arr("subscribers"))
       end
     end
 

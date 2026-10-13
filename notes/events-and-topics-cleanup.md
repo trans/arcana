@@ -1,8 +1,10 @@
 # Design notes: events + topics cleanup
 
 Design brief for a future bundled cleanup of the event log format,
-event-type taxonomy, and the topic namespace. Nothing here is shipped.
-Recording it so we can pick it up cleanly when we're ready.
+event-type taxonomy, and the topic namespace. **The shared-log topics
+MVP shipped on its own** in arcana-core 0.19.0 and arcana 0.35.2 (see
+"MVP: shared-log topics" below, and "As built" there). The rest of this
+note (proposals 1–6, the `sys.message.sent` migration) is not shipped.
 
 **Motivating principle:** self-describing data. Someone reading a JSON
 blob from the event log — or from any bus channel — should not need
@@ -250,7 +252,42 @@ Concrete scope for the first cut. Anything not listed is deferred.
   Access control ties into the SaaS auth story (Stage 3+) and inherits
   whatever listing-level policy that sprint produces.
 
-**Open MVP questions still worth revisiting before implementation:**
+**As built (2026-10-13, the user approved shipping topics alone):**
+
+- Shipped without the event-log cleanup, so the notification keeps the
+  `subject` field and event names are unchanged (`topic.published`
+  gains a `seq`).
+- **Item 8 deferred:** `sys.message.sent` stays the old fan-out. The
+  event-log bundle renames it to `.delivered` anyway, so migrating it
+  now would make subscribers (AIX) change twice.
+- **Notifications** come *from* the topic (`from: "#news"`), with the
+  post's subject (or `post <seq>` when it has none) and a fresh
+  correlation id, so they can't fulfil an expectation on the post's id.
+  The `#` sigil on `from` tells them apart from direct mail; no special
+  subject is needed. The payload is as above. Full mailboxes drop the
+  notification (best-effort).
+- **The directory shows freshness:** a topic's listing has `last_seq`,
+  `last_published_at`, `retention` and `subscribers`, so an agent can
+  see something new without subscribing (the user's point). Subscribing
+  remains for agents that shouldn't have to remember to check, or are
+  blocked on `receive`.
+- **Reading:** `arcana_inbox address:"#news" after: limit:` returns
+  `{topic, first_seq, last_seq, posts: [{seq, from, subject, payload,
+  correlation_id, timestamp}]}`, full posts (topics have no separate
+  receive), default limit 100, max 1000. `first_seq > after + 1` means
+  posts were dropped before the reader got to them.
+- **Retention** is capped at 100,000 posts (all in memory).
+- **Topic names** allow dot-separated parts (`#arcana.releases`).
+- **MCP:** no new tool. `arcana_register` takes `kind: "topic"` and
+  `retention`, and actions `subscribe`, `unsubscribe` and
+  `subscriptions`. Subscribing someone needs their mailbox token and
+  owner token when they have them.
+- **Persistence:** posts, numbering and subscribers are in the
+  shutdown snapshot (`topics`), like mailboxes. Old-style subscriptions
+  are still not persisted.
+- Visibility stub: deferred, with ACLs.
+
+**MVP questions that were open (both settled under "As built"):**
 
 - Notification for a `#topic` — deliver directly to the subscriber's
   mailbox, or through a wrapper envelope so subscribers can
