@@ -257,25 +257,28 @@ arcana_ts.start
 
 # Adds what a call used and cost to a tool's reply: `usage`, the same
 # categories for every provider (absent when the provider reported none),
-# and `cost` in USD at the provider's list price, or `unpriced` saying
-# why it can't be priced.
-#
-# The old counts (`prompt_tokens`, `completion_tokens`, `reasoning_tokens`,
-# `total_tokens`) are deprecated, and the reply says so; they go away in
-# 0.36.0 with arcana-ai 0.6.0.
-def add_cost(reply : Hash(String, JSON::Any), result : Arcana::AI::Chat::Response | Arcana::AI::Embed::Result) : Nil
-  old = result.is_a?(Arcana::AI::Embed::Result) ? "total_tokens is deprecated and goes" : "prompt_tokens, completion_tokens and reasoning_tokens are deprecated and go"
-  reply["deprecated"] = JSON::Any.new("#{old} away in arcana 0.36.0: use usage, the same for every provider, and cost")
-  if usage = result.usage
+# and `cost` in USD (the provider's list price, or its own figure for a
+# Runware image), or `unpriced` saying why it can't be priced.
+def add_cost(reply : Hash(String, JSON::Any), usage : Arcana::AI::Usage?, cost : Arcana::AI::Pricing::Cost | Arcana::AI::Pricing::Unpriced) : Nil
+  if usage
     reply["usage"] = JSON.parse(usage.to_json)
   end
-  case cost = result.cost
+  case cost
   in Arcana::AI::Pricing::Cost
     reply["cost"] = JSON::Any.new(cost.total.to_f)
     reply["cost_excludes"] = JSON::Any.new(cost.excluded.map { |e| JSON::Any.new(e) }) unless cost.complete?
   in Arcana::AI::Pricing::Unpriced
     reply["unpriced"] = JSON::Any.new(cost.detail)
   end
+end
+
+# As above, for chat and embeddings, whose old counts (`prompt_tokens`,
+# `completion_tokens`, `reasoning_tokens`, `total_tokens`) are deprecated:
+# the reply says so. They go away in 0.36.0 with arcana-ai 0.6.0.
+def add_cost(reply : Hash(String, JSON::Any), result : Arcana::AI::Chat::Response | Arcana::AI::Embed::Result) : Nil
+  old = result.is_a?(Arcana::AI::Embed::Result) ? "total_tokens is deprecated and goes" : "prompt_tokens, completion_tokens and reasoning_tokens are deprecated and go"
+  reply["deprecated"] = JSON::Any.new("#{old} away in arcana 0.36.0: use usage, the same for every provider, and cost")
+  add_cost(reply, result.usage, result.cost)
 end
 
 if openai_key = ENV["OPENAI_API_KEY"]?
@@ -341,7 +344,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
   tts_schema = JSON.parse(%({"type":"object","properties":{"text":{"type":"string","description":"Text to synthesize"},"voice":{"type":"string","description":"Voice: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse (default: alloy)"},"output_path":{"type":"string","description":"File path for output audio (required unless inline: true)"},"inline":{"type":"boolean","description":"If true, return audio as base64 in the response instead of writing to disk. Default false."},"format":{"type":"string","description":"Audio format: mp3, wav, aac, flac, opus, pcm (default: opus)"},"instructions":{"type":"string","description":"Style/persona instructions"},"speed":{"type":"number","description":"Speed 0.25-4.0 (default: 1.0)"}},"required":["text"]}))
 
   openai_ts.tool("tts",
-    "Text-to-speech synthesis. Provide either output_path or inline: true.",
+    "Text-to-speech synthesis. Provide either output_path or inline: true. Replies with usage and cost (USD, list price) for gpt-4o-mini-tts; OpenAI shuts its speech models down on 2027-01-06.",
     input_schema: tts_schema) do |data|
     inline = data.bool("inline")
     output_path = data.str?("output_path")
@@ -357,21 +360,16 @@ if openai_key = ENV["OPENAI_API_KEY"]?
 
     if inline
       result = tts_openai.synthesize(request)
-      JSON::Any.new({
-        "audio_base64"   => JSON::Any.new(Base64.strict_encode(result.audio)),
-        "model"          => JSON::Any.new(result.model),
-        "content_type"   => JSON::Any.new(result.content_type),
-        "content_length" => JSON::Any.new(result.content_length),
-      })
+      h = {"audio_base64" => JSON::Any.new(Base64.strict_encode(result.audio))} of String => JSON::Any
     else
       result = tts_openai.synthesize(request, output_path.not_nil!)
-      JSON::Any.new({
-        "output_path"    => JSON::Any.new(result.output_path),
-        "model"          => JSON::Any.new(result.model),
-        "content_type"   => JSON::Any.new(result.content_type),
-        "content_length" => JSON::Any.new(result.content_length),
-      })
+      h = {"output_path" => JSON::Any.new(result.output_path)} of String => JSON::Any
     end
+    h["model"] = JSON::Any.new(result.model)
+    h["content_type"] = JSON::Any.new(result.content_type)
+    h["content_length"] = JSON::Any.new(result.content_length)
+    add_cost(h, result.usage, result.cost)
+    JSON::Any.new(h)
   end
 
   openai_ts.start
@@ -488,7 +486,7 @@ if runware_key = ENV["RUNWARE_API_KEY"]?
   image_schema = JSON.parse(%({"type":"object","properties":{"prompt":{"type":"string","description":"Image description"},"output_path":{"type":"string","description":"File path for output image"},"width":{"type":"integer","description":"Width in pixels (default: 1024, auto-snapped to FLUX sizes)"},"height":{"type":"integer","description":"Height in pixels (default: 1024)"},"format":{"type":"string","description":"Output format: WEBP (default), PNG"},"enhance_prompt":{"type":"boolean","description":"Let provider rewrite prompt (default: false)"}},"required":["prompt","output_path"]}))
 
   runware_ts.tool("image",
-    "Generate an image from a prompt via FLUX. Dimensions auto-snapped to FLUX aspect ratios.",
+    "Generate an image from a prompt via FLUX. Dimensions auto-snapped to FLUX aspect ratios. Replies with cost (USD, as Runware reports it).",
     input_schema: image_schema) do |data|
     request = Arcana::AI::Image::Request.new(
       prompt: data["prompt"].as_s,
@@ -502,9 +500,7 @@ if runware_key = ENV["RUNWARE_API_KEY"]?
       "output_path" => JSON::Any.new(result.output_path),
       "model"       => JSON::Any.new(result.model),
     } of String => JSON::Any
-    if cost = result.cost
-      h["cost"] = JSON::Any.new(cost)
-    end
+    add_cost(h, result.usage, result.cost(Time.utc))
     JSON::Any.new(h)
   end
 
