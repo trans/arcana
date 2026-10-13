@@ -255,6 +255,23 @@ arcana_ts.start
 
 # -- Provider-backed services (only registered when API keys are present) --
 
+# Adds what a call used and cost to a tool's reply: `usage`, the same
+# categories for every provider (absent when the provider reported none),
+# and `cost` in USD at the provider's list price, or `unpriced` saying
+# why it can't be priced.
+def add_cost(reply : Hash(String, JSON::Any), result : Arcana::AI::Chat::Response | Arcana::AI::Embed::Result) : Nil
+  if usage = result.usage
+    reply["usage"] = JSON.parse(usage.to_json)
+  end
+  case cost = result.cost
+  in Arcana::AI::Pricing::Cost
+    reply["cost"] = JSON::Any.new(cost.total.to_f)
+    reply["cost_excludes"] = JSON::Any.new(cost.excluded.map { |e| JSON::Any.new(e) }) unless cost.complete?
+  in Arcana::AI::Pricing::Unpriced
+    reply["unpriced"] = JSON::Any.new(cost.detail)
+  end
+end
+
 if openai_key = ENV["OPENAI_API_KEY"]?
   chat_openai = Arcana::AI::Chat::OpenAI.new(api_key: openai_key)
   embed_openai = Arcana::AI::Embed::OpenAI.new(api_key: openai_key)
@@ -271,7 +288,7 @@ if openai_key = ENV["OPENAI_API_KEY"]?
   chat_openai_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model to use (default: gpt-4o-mini). For reasoning: o1, o3, o4-mini, etc."},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 150). For reasoning models, this is the max_completion_tokens cap."},"thinking":{"description":"Enable reasoning. `true` uses defaults; `{effort: 'low'|'medium'|'high'}` controls the tier. Requires an o-series model (o1, o3, o4-mini). Response includes reasoning_tokens count; OpenAI does not surface the reasoning text."}},"required":["messages"]}))
 
   openai_ts.tool("chat",
-    "Chat completion. Send messages array; get content, model, finish_reason, token counts back. Optional `thinking: true` for reasoning models.",
+    "Chat completion. Send messages array; get content, model, finish_reason, token usage and cost (USD, list price) back. Optional `thinking: true` for reasoning models.",
     input_schema: chat_openai_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
@@ -294,22 +311,25 @@ if openai_key = ENV["OPENAI_API_KEY"]?
     if rt = response.reasoning_tokens
       h["reasoning_tokens"] = JSON::Any.new(rt)
     end
+    add_cost(h, response)
     JSON::Any.new(h)
   end
 
   embed_schema = JSON.parse(%({"type":"object","properties":{"texts":{"type":"array","items":{"type":"string"},"description":"Texts to embed"},"model":{"type":"string","description":"Model (default: text-embedding-3-small)"}},"required":["texts"]}))
 
   openai_ts.tool("embed",
-    "Generate text embedding vectors for an array of texts.",
+    "Generate text embedding vectors for an array of texts. Replies with token usage and cost (USD, list price).",
     input_schema: embed_schema) do |data|
     texts = data["texts"].as_a.map(&.as_s)
     request = Arcana::AI::Embed::Request.new(texts: texts, model: data.str("model"))
     result = embed_openai.embed(request)
-    JSON::Any.new({
+    h = {
       "embeddings"   => JSON::Any.new(result.embeddings.map { |e| JSON::Any.new(e.map { |v| JSON::Any.new(v) }) }),
       "dimensions"   => JSON::Any.new(result.dimensions),
       "total_tokens" => JSON::Any.new(result.total_tokens),
-    })
+    } of String => JSON::Any
+    add_cost(h, result)
+    JSON::Any.new(h)
   end
 
   tts_schema = JSON.parse(%({"type":"object","properties":{"text":{"type":"string","description":"Text to synthesize"},"voice":{"type":"string","description":"Voice: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse (default: alloy)"},"output_path":{"type":"string","description":"File path for output audio (required unless inline: true)"},"inline":{"type":"boolean","description":"If true, return audio as base64 in the response instead of writing to disk. Default false."},"format":{"type":"string","description":"Audio format: mp3, wav, aac, flac, opus, pcm (default: opus)"},"instructions":{"type":"string","description":"Style/persona instructions"},"speed":{"type":"number","description":"Speed 0.25-4.0 (default: 1.0)"}},"required":["text"]}))
@@ -365,7 +385,7 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
   chat_anthropic_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: claude-sonnet-5-5)"},"temperature":{"type":"number","description":"Sampling temperature (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"web_search":{"type":"boolean","description":"If true, Claude can search the web during its response. The model decides when/whether. Default: false."},"thinking":{"description":"Enable extended thinking. `true` uses defaults (budget: 1024); `{budget: N}` sets the thinking token budget (must be less than max_tokens). Response includes thinking_content with the reasoning text."}},"required":["messages"]}))
 
   anthropic_ts.tool("chat",
-    "Chat completion via Claude. Optional web_search:true lets the model browse. Optional thinking:true enables extended thinking.",
+    "Chat completion via Claude. Optional web_search:true lets the model browse. Optional thinking:true enables extended thinking. Replies with token usage and cost (USD, list price).",
     input_schema: chat_anthropic_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
@@ -393,6 +413,7 @@ if anthropic_key = ENV["ANTHROPIC_API_KEY"]?
     if tc = response.thinking_content
       h["thinking_content"] = JSON::Any.new(tc)
     end
+    add_cost(h, response)
     JSON::Any.new(h)
   end
 
@@ -413,7 +434,7 @@ if google_key = ENV["GOOGLE_API_KEY"]?
   chat_gemini_schema = JSON.parse(%({"type":"object","properties":{"messages":{"type":"array","description":"Array of message objects with role and content","items":{"type":"object","properties":{"role":{"type":"string","enum":["system","user","assistant"]},"content":{"type":"string"}},"required":["role","content"]}},"model":{"type":"string","description":"Model (default: gemini-2.5-flash)"},"temperature":{"type":"number","description":"Sampling temperature 0.0-2.0 (default: 0.7)"},"max_tokens":{"type":"integer","description":"Maximum response tokens (default: 4096)"},"thinking":{"description":"Enable thinking (Gemini 2.5 series). `true` uses defaults; `{budget: N, include_thoughts: bool}` controls the budget and whether the model surfaces its thoughts. Response includes thinking_content when include_thoughts is true, and reasoning_tokens either way."}},"required":["messages"]}))
 
   gemini_ts.tool("chat",
-    "Chat completion via Gemini. System messages become systemInstruction. Optional thinking:true for 2.5 series reasoning.",
+    "Chat completion via Gemini. System messages become systemInstruction. Optional thinking:true for 2.5 series reasoning. Replies with token usage and cost (USD, list price).",
     input_schema: chat_gemini_schema) do |data|
     msgs = data["messages"].as_a.map do |m|
       Arcana::AI::Chat::Message.new(role: m["role"].as_s, content: m.str?("content"))
@@ -439,6 +460,7 @@ if google_key = ENV["GOOGLE_API_KEY"]?
     if rt = response.reasoning_tokens
       h["reasoning_tokens"] = JSON::Any.new(rt)
     end
+    add_cost(h, response)
     JSON::Any.new(h)
   end
 
