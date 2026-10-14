@@ -1,3 +1,14 @@
+arcana (0.35.3-1) unstable; urgency=medium
+
+  * The session hooks follow dot-ai draft 0.3. The handle and description
+    come from the top-level `handle` and `description` keys of
+    `.ai/config.yml`; the old `arcana:` keys are still read when those
+    are missing. Unread mail moved to `.ai/mail/inbox/` at session end is
+    named time first, `<UTC time>-<sender>--<topic>-<id8>.md`, and written
+    under a hidden name before it's renamed into place.
+
+ -- trans <transfire@gmail.com>  Wed, 14 Oct 2026 02:30:00 +0000
+
 arcana (0.35.2-1) unstable; urgency=medium
 
   * Shared-log topics (arcana-core 0.19.0): a `#topic` registered with
