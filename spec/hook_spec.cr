@@ -58,7 +58,7 @@ private def send_mail(port : Int32, to : String, subject : String, payload)
     body: {from: "@sender", to: to, subject: subject, payload: payload}.to_json)
 end
 
-CONFIG = %(arcana:\n  handle: "@proj"\n  description: >\n    The project's agent.\n)
+CONFIG = %(# The project's agent\nhandle: proj\ndescription: >\n  The project's agent.\n)
 
 describe Arcana::AgentConfig do
   it "reads handle and description from .ai/config.yml" do
@@ -69,8 +69,17 @@ describe Arcana::AgentConfig do
     end
   end
 
-  it "adds the @ to an unquoted handle" do
-    project("arcana:\n  handle: proj\n") { |dir| Arcana::AgentConfig.load(dir).handle.should eq("@proj") }
+  it "takes a handle written with its @" do
+    project(%(handle: "@proj"\n)) { |dir| Arcana::AgentConfig.load(dir).handle.should eq("@proj") }
+  end
+
+  it "still reads a config from before dot-ai 0.3, under arcana:" do
+    project(%(arcana:\n  handle: "@old"\n  description: Old style.\n)) do |dir|
+      cfg = Arcana::AgentConfig.load(dir)
+      cfg.handle.should eq("@old")
+      cfg.description.should eq("Old style.")
+    end
+    project(%(handle: new\narcana:\n  handle: "@old"\n)) { |dir| Arcana::AgentConfig.load(dir).handle.should eq("@new") }
   end
 
   it "falls back to @ plus a legal form of the directory name" do
@@ -227,7 +236,7 @@ describe Arcana::Hook do
 
           notes = Dir.glob(File.join(dir, ".ai", "mail", "inbox", "*.md"))
           notes.size.should eq(1)
-          File.basename(notes[0]).should start_with("@sender--")
+          File.basename(notes[0]).should match(/\A\d{8}-\d{6}Z-@sender--release-notes-[0-9a-f]{8}\.md\z/)
           note = File.read(notes[0])
           note.should start_with("From: @sender\n")
           note.should contain("Subject: Release notes\n")
@@ -253,5 +262,41 @@ describe Arcana::Hook do
         end
       end
     end
+  end
+end
+
+describe "Arcana::Hook.write_note" do
+  it "names a note time first, in UTC, with the subject as its topic" do
+    inbox = File.tempname("arcana-inbox")
+    Dir.mkdir_p(inbox)
+    begin
+      env = JSON.parse({from: "@ipck", to: "@proj", subject: "dot-ai 0.3: Top-level handle!",
+                        timestamp: "2026-10-13T14:05:39-05:00", correlation_id: "b6c3b174eb93eff7",
+                        payload: {text: "hi"}}.to_json)
+      path = Arcana::Hook.write_note(inbox, env)
+      File.basename(path).should eq("20261013-190539Z-@ipck--dot-ai-0.3-top-level-handle-b6c3b174.md")
+      File.read(path).should contain("Sent: 2026-10-13T14:05:39-05:00\n")
+      Dir.children(inbox).should eq([File.basename(path)]) # no temp file left behind
+    ensure
+      FileUtils.rm_rf(inbox)
+    end
+  end
+
+  it "leaves the topic out without a subject, and keeps a topic's #" do
+    inbox = File.tempname("arcana-inbox")
+    Dir.mkdir_p(inbox)
+    begin
+      env = JSON.parse({from: "#arcana.releases", timestamp: "2026-10-13T19:05:39Z",
+                        correlation_id: "a1b2c3d4e5f6", payload: {text: "post 3"}}.to_json)
+      File.basename(Arcana::Hook.write_note(inbox, env)).should eq("20261013-190539Z-#arcana.releases--a1b2c3d4.md")
+    ensure
+      FileUtils.rm_rf(inbox)
+    end
+  end
+
+  it "cuts a long topic to 50 characters" do
+    Arcana::Hook.mail_topic("x" * 49 + " and more").should eq("x" * 49)
+    Arcana::Hook.mail_topic("Ünïcode — only?").should eq("n-code-only")
+    Arcana::Hook.mail_topic("!!!").should be_nil
   end
 end

@@ -3,16 +3,16 @@ require "random/secure"
 
 module Arcana
   # Who a project's agent is on the bus, read from the project's
-  # `.ai/config.yml` (the dot-ai convention):
+  # `.ai/config.yml` (the dot-ai convention, draft 0.3):
   #
-  #     arcana:
-  #       handle: "@arcana"
-  #       description: >
-  #         The agent for the Arcana bus itself.
+  #     handle: arcana
+  #     description: >
+  #       The agent for the Arcana bus itself.
   #
-  # Without a handle in the config, the handle falls back to `@` plus the
-  # project directory's name, which is what the session hooks used before
-  # the config existed.
+  # The handle may be written with or without its `@`. Configs from before
+  # draft 0.3 kept both keys under `arcana:`; those are still read when the
+  # top-level keys are missing. Without a handle anywhere, the handle falls
+  # back to `@` plus the project directory's name.
   #
   # The owner token proves to the bus that a registration is this
   # project's (see `Directory#claim`). It lives in `.ai/arcana.token`,
@@ -43,13 +43,17 @@ module Arcana
         rescue ex
           raise Error.new("can't read #{path}: #{ex.message}")
         end
-        if arcana = yaml.as_h?.try(&.[YAML::Any.new("arcana")]?).try(&.as_h?)
-          handle = arcana[YAML::Any.new("handle")]?.try(&.as_s?).try(&.strip).try(&.presence)
-          description = arcana[YAML::Any.new("description")]?.try(&.as_s?).try(&.strip)
-        end
+        top = yaml.as_h?
+        old = top.try(&.[YAML::Any.new("arcana")]?).try(&.as_h?)
+        handle = string_key(top, "handle").try(&.presence) || string_key(old, "handle").try(&.presence)
+        description = string_key(top, "description") || string_key(old, "description")
       end
       handle = handle ? (handle.starts_with?('@') ? handle : "@#{handle}") : fallback_handle(project_dir)
       new(project_dir, handle, description || "")
+    end
+
+    private def self.string_key(map : Hash(YAML::Any, YAML::Any)?, key : String) : String?
+      map.try(&.[YAML::Any.new(key)]?).try(&.as_s?).try(&.strip)
     end
 
     def self.config_path(project_dir : String) : String?

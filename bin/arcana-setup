@@ -80,7 +80,7 @@ echo ""
 # project's .ai/config.yml (falling back to @<directory name>), the
 # registration carries the project's owner token, session start tells the
 # agent who it is on the bus, and session end moves unread mail into
-# .ai/inbox/ and marks the handle offline instead of unregistering it.
+# .ai/mail/inbox/ and marks the handle offline instead of unregistering it.
 
 # write_hook <path> <event> <agent> <comment>
 write_hook() {

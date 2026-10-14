@@ -94,7 +94,7 @@ module Arcana
         lines << "#{pending} message#{pending == 1 ? "" : "s"} waiting: arcana_inbox address:\"#{cfg.handle}\"."
       end
       if cfg.description.empty?
-        lines << "Your listing has no description: add arcana.description to .ai/config.yml " \
+        lines << "Your listing has no description: add a description to .ai/config.yml " \
                  "(or ask the user for one), so other agents know what this project's agent does."
       end
       lines.join("\n")
@@ -182,9 +182,11 @@ module Arcana
       messages.map { |env| write_note(inbox, env) }
     end
 
-    # A mail file: header lines, a blank line, then the message. Named by
-    # the sender, `<handle>--<YYYY-MM-DD-HHMMSS>-<id>.md`, as outbound mail
-    # is named by its recipient.
+    # A mail file: header lines, a blank line, then the message. Named
+    # time first (dot-ai draft 0.3), by the time it was sent in UTC, the
+    # sender, the subject as a topic, and the first 8 characters of its
+    # id: `20261013-190539Z-@ipck--dot-ai-0.3-b6c3b174.md`, or
+    # `<time>-<sender>--<id8>.md` without a subject.
     def self.write_note(inbox : String, env : JSON::Any) : String
       from = env["from"]?.try(&.as_s?) || "unknown"
       to = env["to"]?.try(&.as_s?) || ""
@@ -207,12 +209,25 @@ module Arcana
         end
       end
 
-      sender = from.gsub(/[^@a-zA-Z0-9_-]+/, "-").gsub(/-{2,}/, "-").strip('-')
-      path = File.join(inbox, "#{sender}--#{time.to_s("%Y-%m-%d-%H%M%S")}-#{id[0, 8]}.md")
-      tmp = "#{path}.tmp"
+      # `#` stays, so a topic's notification is named by the topic.
+      sender = from.gsub(/[^@#a-zA-Z0-9_.-]+/, "-").gsub(/-{2,}/, "-").strip('-')
+      sender = "unknown" if sender.empty?
+      tail = [mail_topic(subject), id[0, 8]].compact.join('-')
+      name = "#{time.to_utc.to_s("%Y%m%d-%H%M%SZ")}-#{sender}--#{tail}.md"
+      path = File.join(inbox, name)
+      # Readers skip hidden names, so no one reads half a message.
+      tmp = File.join(inbox, ".#{name}")
       File.write(tmp, note)
       File.rename(tmp, path)
       path
+    end
+
+    # A subject as a file name's topic: lowercased, each run of anything
+    # but `a-z`, `0-9`, `.` and `-` turned into `-`, trimmed of `-`, and
+    # cut to 50 characters. Nil when nothing is left.
+    def self.mail_topic(subject : String?) : String?
+      return nil unless subject
+      subject.downcase.gsub(/[^a-z0-9.-]+/, "-").strip('-')[0, 50].rstrip('-').presence
     end
 
     # The message text (a string payload, or its `text`/`message` field)
