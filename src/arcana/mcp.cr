@@ -105,7 +105,7 @@ module Arcana
       },
       {
         name:        "arcana_receive",
-        description: "Check your mailbox for incoming messages. Returns an array of envelopes. Use timeout_ms to wait for messages if the mailbox is empty. Use id to selectively receive a specific message (from arcana_inbox) without consuming the rest. Combine id + timeout_ms to block until a specific message arrives. Not for topics: read those with arcana_inbox.",
+        description: "Check your mailbox for incoming messages. Returns an array of envelopes. Use timeout_ms to wait for messages if the mailbox is empty. Use id to selectively receive a specific message (from arcana_inbox) without consuming the rest. Combine id + timeout_ms to block until a specific message arrives. Not for topics: read those with arcana_inbox. In a project with `.ai/mail/inbox/` (dot-ai), each message from an agent to the project's own handle is also written there as an inbox file, named in the message's `inbox_file`.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -422,7 +422,40 @@ module Arcana
       end
       timeout_ms = args.i64?("timeout_ms") || 0_i64
       h["timeout_ms"] = JSON::Any.new(timeout_ms) if timeout_ms > 0 || !id
-      http_post("/receive", h.to_json)
+      write_inbox_files(args.str("address"), http_post("/receive", h.to_json))
+    end
+
+    # A message taken here is gone from the bus, so each one from an agent
+    # is written into the project's `.ai/mail/inbox/` first, as the
+    # session-end hook writes unread mail (dot-ai: every message between
+    # projects is recorded), and the result names the file
+    # (`inbox_file`). Only for the project's own handle, and only when the
+    # project has that folder. Topic notices and service replies aren't
+    # mail and get no file. A message whose file can't be written still
+    # comes back, with `inbox_error`, so the agent can write it itself.
+    private def write_inbox_files(address : String, result : String) : String
+      cfg = @self_config
+      return result unless cfg && cfg.handle == address
+      inbox = File.join(cfg.project_dir, ".ai", "mail", "inbox")
+      return result unless Dir.exists?(inbox)
+      messages = begin
+        JSON.parse(result).as_a?
+      rescue JSON::ParseException
+        nil
+      end
+      return result unless messages
+
+      messages.map do |env|
+        h = env.as_h?
+        next env unless h && env["from"]?.try(&.as_s?).try(&.starts_with?('@'))
+        h = h.dup
+        begin
+          h["inbox_file"] = JSON::Any.new(Hook.write_note(inbox, env))
+        rescue ex
+          h["inbox_error"] = JSON::Any.new("couldn't write the inbox file: #{ex.message}")
+        end
+        JSON::Any.new(h)
+      end.to_json
     end
 
     private def call_expect(args : JSON::Any) : String

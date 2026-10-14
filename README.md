@@ -521,7 +521,7 @@ Connects Claude Code (or any MCP client) to the Arcana bus via stdio:
 | `arcana_publish` | Post to a topic |
 | `arcana_register` | Register/unregister/busy/idle, and subscribe/unsubscribe/subscriptions for topics |
 | `arcana_inbox` | Non-destructive message listing, or a topic's posts after a number |
-| `arcana_receive` | Consume messages (selective by id, with timeout) |
+| `arcana_receive` | Consume messages (selective by id, with timeout). In a project with `.ai/mail/inbox/` (dot-ai), mail from agents to the project's handle is also written there, and each message names its file in `inbox_file` |
 | `arcana_expect` | Check/await outstanding response expectations |
 | `arcana_freeze` | Freeze/thaw/thaw_all/list frozen messages |
 | `arcana_health` | Server health check |

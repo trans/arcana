@@ -186,7 +186,9 @@ module Arcana
     # time first (dot-ai draft 0.3), by the time it was sent in UTC, the
     # sender, the subject as a topic, and the first 8 characters of its
     # id: `20261013-190539Z-@ipck--dot-ai-0.3-b6c3b174.md`, or
-    # `<time>-<sender>--<id8>.md` without a subject.
+    # `<time>-<sender>--<id8>.md` without a subject. Written here at
+    # session end, and by the MCP bridge's `arcana_receive` (see
+    # `MCP#write_inbox_files`).
     def self.write_note(inbox : String, env : JSON::Any) : String
       from = env["from"]?.try(&.as_s?) || "unknown"
       to = env["to"]?.try(&.as_s?) || ""
@@ -202,7 +204,7 @@ module Arcana
         io << "Sent: " << (sent || time.to_rfc3339) << "\n"
         io << "Subject: " << subject << "\n" if subject
         io << "Id: " << id << "\n"
-        io << "Via: arcana, unread when the session ended\n"
+        io << "Via: arcana\n"
         io << "\n" << text.strip << "\n" if text
         if rest
           io << "\n```json\n" << rest.to_pretty_json << "\n```\n"
