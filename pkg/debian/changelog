@@ -1,3 +1,13 @@
+arcana (0.35.4-1) unstable; urgency=medium
+
+  * `arcana_receive` writes each message from an agent to the project's
+    own handle into `.ai/mail/inbox/` before handing it over, as the
+    session-end hook does for unread mail, and names the file in the
+    message's `inbox_file`. Topic notices and service replies get no
+    file. Inbox files written either way say `Via: arcana`.
+
+ -- trans <transfire@gmail.com>  Wed, 14 Oct 2026 07:30:00 +0000
+
 arcana (0.35.3-1) unstable; urgency=medium
 
   * The session hooks follow dot-ai draft 0.3. The handle and description
