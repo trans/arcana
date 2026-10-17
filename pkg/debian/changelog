@@ -1,3 +1,22 @@
+arcana (0.35.5-1) unstable; urgency=medium
+
+  * `arcana_deliver` files the sender's copy of each message from the
+    project's own handle to an agent under `.ai/mail/sent/`, as local
+    delivery files the outbox's (`Sent: <time> via arcana`), and names
+    it in the result's `sent_file`. Calls to services get no copy.
+  * A session's project is the nearest directory at or above it with
+    `.ai/`, as in dot-ai: a session in a directory without one is the
+    project above it, not a fallback handle of its own. Only with no
+    `.ai/` anywhere above is the handle `@` plus the directory's name.
+    A folder grouping several repositories under one project links its
+    `.ai` to the `.ai/` of the repository that holds it; session start
+    warns when such a link leads nowhere.
+  * The Stop hook tells the agent of waiting mail once per change in the
+    count. Claude was nudged on every other Stop while mail sat unread,
+    and Codex on every Stop.
+
+ -- trans <transfire@gmail.com>  Sat, 17 Oct 2026 12:00:00 +0000
+
 arcana (0.35.4-1) unstable; urgency=medium
 
   * `arcana_receive` writes each message from an agent to the project's
