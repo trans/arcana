@@ -2,11 +2,11 @@ version: 2.0
 shards:
   arcana-ai:
     git: https://github.com/trans/arcana-ai.git
-    version: 0.5.3
+    version: 0.6.0
 
   arcana-core:
     git: https://github.com/trans/arcana-core.git
-    version: 0.19.0
+    version: 0.20.0
 
   baked_file_system:
     git: https://github.com/ralsina/baked_file_system.git

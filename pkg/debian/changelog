@@ -1,3 +1,21 @@
+arcana (0.36.0-1) unstable; urgency=medium
+
+  * Mail sent over the bus has its dot-ai message id, the same on the
+    sender's and the recipient's copy. `arcana_deliver` names the sent
+    copy before sending (`<time>-<to>--<topic>.md`, or `<time>-<to>.md`
+    without a subject), takes the id from that name and the message,
+    carries it with the message, files the copy with `Id:` and returns
+    it as `id`. Inbox files take the id the sender carried, and fall
+    back to the correlation id's first 8 only for a message without one.
+  * `re` on `arcana_deliver` and `arcana_publish` names what a message
+    answers, a message's id or `#topic:<seq>`. It goes with the message
+    and is filed as `Re:` on both sides.
+  * The chat and embed tools no longer reply with prompt_tokens,
+    completion_tokens, reasoning_tokens or total_tokens: use `usage`
+    and `cost`. Depends on arcana-core 0.20.0 and arcana-ai 0.6.0.
+
+ -- trans <transfire@gmail.com>  Sat, 17 Oct 2026 23:30:00 +0000
+
 arcana (0.35.5-1) unstable; urgency=medium
 
   * `arcana_deliver` files the sender's copy of each message from the
