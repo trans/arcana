@@ -125,7 +125,7 @@ describe Arcana::MCP do
         path = result[0]["inbox_file"].as_s
         File.basename(path).should eq("20261014-053900Z-@ipck--inbox-files-6a33907c.md")
         File.read(path).should eq("From: @ipck\nTo: @proj\nSent: 2026-10-14T05:39:00Z\nSubject: Inbox files\n" \
-                                  "Id: 6a33907c1d4519a7\nVia: arcana\n\nCould receive write them?\n")
+                                  "Id: 6a33907c\nVia: arcana\n\nCould receive write them?\n")
         result[1]["inbox_file"]?.should be_nil # a topic's notice isn't mail
         result[2]["inbox_file"]?.should be_nil # nor is a service's reply
         Dir.children(File.join(dir, ".ai", "mail", "inbox")).should eq([File.basename(path)])
@@ -182,26 +182,59 @@ describe Arcana::MCP do
     }
     ok = %({"ok":true,"ordering":"async","correlation_id":"6a33907c1d4519a7"})
 
-    it "files mail to an agent under sent/ and names the file" do
+    it "files mail to an agent under sent/ with its id, which goes with the message" do
       with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
         result = result_of.call(mcp, {to: "@ipck", subject: "Message ids", payload: {text: "Carry the id?\n", seq: 3}}.to_json)
         result["correlation_id"].should eq("6a33907c1d4519a7")
         path = result["sent_file"].as_s
+        name = File.basename(path)
         File.dirname(path).should eq(File.join(dir, ".ai", "mail", "sent"))
-        File.basename(path).should match(/\A\d{8}-\d{6}Z-@ipck--message-ids\.md\z/)
-        File.read(path).should match(/\ASent: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ via arcana\n\n/)
-        File.read(path).should end_with("\n\nCarry the id?\n\n```json\n{\n  \"seq\": 3\n}\n```\n")
+        name.should match(/\A\d{8}-\d{6}Z-@ipck--message-ids\.md\z/)
+        message = "Carry the id?\n\n```json\n{\n  \"seq\": 3\n}\n```\n"
+        id = Arcana::Hook.message_id("@proj", name, message)
+        result["id"].should eq(id)
+        bodies[0]["id"].should eq(id)
+        File.read(path).should match(/\ASent: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ via arcana\nId: #{id}\n\n/)
+        File.read(path).should end_with("\n\n#{message}")
         bodies[0]["from"].should eq("@proj")
         nil
       })
     end
 
-    it "files the message the bus got, when the payload came as a JSON string" do
+    it "names a message without a subject by its recipient alone" do
       with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
         result = result_of.call(mcp, {to: "@ipck", payload: %({"text":"hi"})}.to_json)
         bodies[0]["payload"].should eq(JSON.parse(%({"text":"hi"})))
-        File.basename(result["sent_file"].as_s).should match(/\A\d{8}-\d{6}Z-@ipck--6a33907c\.md\z/)
-        File.read(result["sent_file"].as_s).should end_with(" via arcana\n\nhi\n")
+        File.basename(result["sent_file"].as_s).should match(/\A\d{8}-\d{6}Z-@ipck\.md\z/)
+        File.read(result["sent_file"].as_s).should end_with(" via arcana\nId: #{result["id"]}\n\nhi\n")
+        nil
+      })
+    end
+
+    it "carries what a reply answers, and files it as Re:" do
+      with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
+        result = result_of.call(mcp, {to: "@ipck", subject: "Ids", re: "fad11167", payload: {text: "Done."}}.to_json)
+        bodies[0]["re"].should eq("fad11167")
+        File.read(result["sent_file"].as_s).should start_with("Re: fad11167\nSent: ")
+        nil
+      })
+    end
+
+    it "refuses a re that is neither a message's id nor a topic's post" do
+      with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
+        result_of.call(mcp, {to: "@ipck", re: "not an id", payload: {text: "x"}}.to_json)["error"].as_s.should contain("re must be")
+        bodies.should be_empty
+        Dir.children(File.join(dir, ".ai", "mail", "sent")).should be_empty
+        nil
+      })
+    end
+
+    it "gives mail its id even without sent/ to file it in" do
+      with_project.call(false, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
+        result = result_of.call(mcp, {to: "@ipck", subject: "Hello", payload: {text: "hi"}}.to_json)
+        result["sent_file"]?.should be_nil
+        result["id"].as_s.size.should eq(8)
+        bodies[0]["id"].should eq(result["id"])
         nil
       })
     end
@@ -210,6 +243,7 @@ describe Arcana::MCP do
       with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
         result_of.call(mcp, {to: "openai", subject: "chat"}.to_json)["sent_file"]?.should be_nil
         result_of.call(mcp, {to: "@ipck", from: "@other"}.to_json)["sent_file"]?.should be_nil
+        bodies.each { |b| b["id"].raw.should be_nil } # neither is mail
         Dir.children(File.join(dir, ".ai", "mail", "sent")).should be_empty
         nil
       })

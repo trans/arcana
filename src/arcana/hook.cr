@@ -1,3 +1,4 @@
+require "digest/sha256"
 require "http/client"
 require "json"
 require "./agent_config"
@@ -190,18 +191,24 @@ module Arcana
     end
 
     # A mail file: header lines, a blank line, then the message. Named
-    # time first (dot-ai draft 0.3), by the time it was sent in UTC, the
-    # sender, the subject as a topic, and the first 8 characters of its
-    # id: `20261013-190539Z-@ipck--dot-ai-0.3-b6c3b174.md`, or
-    # `<time>-<sender>--<id8>.md` without a subject. Written here at
-    # session end, and by the MCP bridge's `arcana_receive` (see
-    # `MCP#write_inbox_files`). `write_sent` files the sender's copy.
+    # time first (dot-ai), by the time it was sent in UTC, the sender, the
+    # subject as a topic, and the message's id:
+    # `20261013-190539Z-@ipck--dot-ai-0.3-b6c3b174.md`, or
+    # `<time>-<sender>--<id>.md` without a subject. The id is the one the
+    # sender carried with the message (`message_id`); only a message that
+    # came without one, from an older Arcana or another client, is given
+    # the first 8 characters of its correlation id. A reply's `Re:` comes
+    # along. Written here at session end, and by the MCP bridge's
+    # `arcana_receive` (see `MCP#write_inbox_files`). `write_sent` files
+    # the sender's copy.
     def self.write_note(inbox : String, env : JSON::Any) : String
       from = env["from"]?.try(&.as_s?) || "unknown"
       to = env["to"]?.try(&.as_s?) || ""
-      subject = env["subject"]?.try(&.as_s?).try(&.presence)
+      subject = env["subject"]?.try(&.as_s?).try(&.gsub(/[\r\n]+/, " ").strip.presence)
       sent = env["timestamp"]?.try(&.as_s?)
-      id = env["correlation_id"]?.try(&.as_s?).try(&.presence) || Random::Secure.hex(8)
+      id = env["id"]?.try(&.as_s?).try { |i| i if i.matches?(Envelope::MESSAGE_ID) } ||
+           (env["correlation_id"]?.try(&.as_s?).try(&.presence) || Random::Secure.hex(8))[0, 8]
+      re = env["re"]?.try(&.as_s?).try { |r| r if r.matches?(Envelope::REPLY_TO) }
       time = sent.try { |t| Time.parse_rfc3339(t) rescue nil } || Time.utc
 
       body = mail_body(env["payload"]?)
@@ -211,31 +218,55 @@ module Arcana
         io << "Sent: " << (sent || time.to_rfc3339) << "\n"
         io << "Subject: " << subject << "\n" if subject
         io << "Id: " << id << "\n"
+        io << "Re: " << re << "\n" if re
         io << "Via: arcana\n"
         io << "\n" << body if body
       end
 
-      tail = [mail_topic(subject), id[0, 8]].compact.join('-')
+      tail = [mail_topic(subject), id].compact.join('-')
       name = "#{time.to_utc.to_s("%Y%m%d-%H%M%SZ")}-#{name_address(from)}--#{tail}.md"
       write_mail(inbox, name, note)
     end
 
-    # The sender's copy of a message sent over the bus, filed in `sent/` as
-    # local delivery files the outbox's (dot-ai draft 0.3): named by the
-    # time it was sent in UTC, the recipient and the subject as a topic
-    # (`20261017-120000Z-@ipck--message-ids.md`), or the first 8
-    # characters of its id without a subject, holding a `Sent:` line, a
-    # blank line, then the message. Never replaces a file: a second
-    # message to the same address and topic in the same second gets `-2`.
-    def self.write_sent(sent : String, to : String, subject : String?, payload : JSON::Any?,
-                        time : Time, id : String) : String
-      time = time.to_utc
-      note = "Sent: #{time.to_rfc3339} via arcana\n\n#{mail_body(payload)}"
-      base = "#{time.to_s("%Y%m%d-%H%M%SZ")}-#{name_address(to)}--#{mail_topic(subject) || id[0, 8]}"
+    # A message's id (dot-ai): the first 8 hex digits of the SHA-256 of
+    # the sender's address, the outbound file's name and the message as
+    # its file holds it (`mail_body`), joined by newlines. The same on the
+    # sender's copy and the recipient's, whatever carries the message, so
+    # anyone with the sent copy can compute it again.
+    def self.message_id(from : String, name : String, message : String) : String
+      Digest::SHA256.hexdigest("#{from}\n#{name}\n#{message}")[0, 8]
+    end
+
+    # The name a message sent over the bus has in `sent/` (dot-ai): the
+    # time it was written in UTC, the recipient and the subject as a topic
+    # (`20261017-120000Z-@ipck--message-ids.md`), or `<time>-<address>.md`
+    # without a subject. A name already in use in `mail_dir`'s drafts,
+    # outbox or sent gets `-2`, `-3` and so on. Without `mail_dir` (no
+    # `mail/` to file in), the name the copy would have, from which the
+    # id is still taken.
+    def self.sent_name(mail_dir : String?, to : String, subject : String?, time : Time) : String
+      topic = mail_topic(subject)
+      base = "#{time.to_utc.to_s("%Y%m%d-%H%M%SZ")}-#{name_address(to)}#{topic ? "--#{topic}" : ""}"
       name = "#{base}.md"
+      return name unless mail_dir
       n = 1
-      while File.exists?(File.join(sent, name))
+      while {"drafts", "outbox", "sent"}.any? { |d| File.exists?(File.join(mail_dir, d, name)) }
         name = "#{base}-#{n += 1}.md"
+      end
+      name
+    end
+
+    # The sender's copy of a message sent over the bus, filed in `sent/`
+    # under `name` (`sent_name`) as local delivery files the outbox's: a
+    # `Re:` line if it answers something, `Sent:` and `Id:`, a blank line,
+    # then the message (`mail_body`).
+    def self.write_sent(sent : String, name : String, message : String, time : Time,
+                        id : String, re : String? = nil) : String
+      note = String.build do |io|
+        io << "Re: " << re << "\n" if re
+        io << "Sent: " << time.to_utc.to_rfc3339 << " via arcana\n"
+        io << "Id: " << id << "\n"
+        io << "\n" << message
       end
       write_mail(sent, name, note)
     end

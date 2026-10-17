@@ -39,7 +39,7 @@ module Arcana
       },
       {
         name:        "arcana_deliver",
-        description: "Send a message on the Arcana bus. By default (ordering: auto), the bus decides sync vs async based on the target: services get sync (blocks for reply), agents get async (fire and forget, check arcana_receive later). Override with ordering 'sync' or 'async'. The response tells you which mode was used and the correlation_id for tracking. In a project with `.ai/mail/sent/` (dot-ai), each message from the project's own handle to an agent is also filed there as the sender's copy, named in the response's `sent_file`: don't file it again.",
+        description: "Send a message on the Arcana bus. By default (ordering: auto), the bus decides sync vs async based on the target: services get sync (blocks for reply), agents get async (fire and forget, check arcana_receive later). Override with ordering 'sync' or 'async'. The response tells you which mode was used and the correlation_id for tracking. Each message from the project's own handle to an agent gets its dot-ai message id (the response's `id`), carried with it; in a project with `.ai/mail/sent/`, it is also filed there as the sender's copy, named in the response's `sent_file`: don't file it again. To answer a message, pass its id (its inbox file's `Id:`) as `re`.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -49,6 +49,7 @@ module Arcana
             payload:    {description: "Message payload — pass a JSON OBJECT with the fields the target service expects (e.g. {\"text\":\"hi\",\"output_path\":\"/tmp/x.opus\"} for openai:tts). Not a stringified JSON blob — pass the object directly. The server does auto-unwrap stringified JSON as a fallback, but the tool schema wants an object."},
             ordering:   {type: "string", enum: ["auto", "sync", "async"], description: "Message ordering: auto (default, resolved by target kind), sync (block for reply), or async (fire and forget)"},
             timeout_ms: {type: "integer", description: "Timeout in milliseconds for sync ordering (default: 30000)"},
+            re:         {type: "string", description: "What this message answers: a message's id (the `Id:` of its inbox file), or a topic's post as `#topic:<seq>`. Carried with the message as its `Re:`."},
           },
           required: ["to"],
         },
@@ -63,6 +64,7 @@ module Arcana
             from:    {type: "string", description: "Your address on the bus. Defaults to this project's handle."},
             subject: {type: "string", description: "What the post is about: subscribers see it in their notification"},
             payload: {description: "The post (any JSON value)"},
+            re:      {type: "string", description: "What this post answers: a message's id, or another post as `#topic:<seq>`"},
           },
           required: ["topic"],
         },
@@ -307,13 +309,19 @@ module Arcana
       end
     end
 
+    BAD_RE = {error: "re must be a message's id (8 or more hex digits, its inbox file's Id:) or a topic's post as #topic:<seq>"}.to_json
+
     private def call_deliver(args : JSON::Any) : String
       ordering = args.str("ordering", "auto")
       from = args.str("from", default_from)
       to = args.str("to")
       subject = args.str("subject")
+      re = args.str?("re").try(&.strip.presence)
+      return BAD_RE if re && !re.matches?(Envelope::REPLY_TO)
       # As the daemon will have it, so the copy filed below says the same.
       payload = Server.normalize_payload(args["payload"]?)
+      time = Time.utc
+      mail = outbound_mail(from, to, subject, payload, time)
       body = {
         from:       from,
         to:         to,
@@ -321,28 +329,41 @@ module Arcana
         payload:    payload,
         ordering:   ordering,
         timeout_ms: args.int("timeout_ms", 30_000),
+        id:         mail.try(&.[:id]),
+        re:         re,
       }.to_json
-      time = Time.utc
       resp = request { @http.post("/deliver", headers: json_headers, body: body) }
       return resp.body unless resp.success?
-      write_sent_file(from, to, subject, payload, time, resp.body)
+      return resp.body unless mail
+      file_sent(mail, re, time, resp.body)
+    end
+
+    # Mail is a message from the project's own handle to an agent; calls
+    # to services, and messages from other senders, aren't. Mail gets its
+    # dot-ai id before it goes, from the name its `sent/` copy has, or
+    # would have where the project has no `mail/` (`Hook.sent_name`), and
+    # the message as that copy holds it. Nil when it isn't mail.
+    private def outbound_mail(from : String, to : String, subject : String, payload : JSON::Any,
+                              time : Time) : NamedTuple(id: String, name: String, message: String, sent: String?)?
+      cfg = @self_config
+      return unless cfg && cfg.handle == from && to.starts_with?('@')
+      mail_dir = File.join(cfg.project_dir, ".ai", "mail")
+      sent = File.join(mail_dir, "sent")
+      name = Hook.sent_name(Dir.exists?(mail_dir) ? mail_dir : nil, to, subject, time)
+      message = Hook.mail_body(payload) || ""
+      {id: Hook.message_id(from, name, message), name: name, message: message, sent: Dir.exists?(sent) ? sent : nil}
     end
 
     # Mail sent here goes onto the bus without passing through the outbox,
     # so the bridge files the sender's copy itself, as local delivery files
-    # the outbox's: each message from the project's own handle to an agent
-    # that the bus took is written into `.ai/mail/sent/` (dot-ai: both
-    # projects keep every message between them), and the result names the
-    # file (`sent_file`). Only when the project has that folder. Calls to
-    # services aren't mail and get no file. The message went even if its
-    # copy can't be written; the result then says why (`sent_error`), so
-    # the agent can file it itself.
-    private def write_sent_file(from : String, to : String, subject : String, payload : JSON::Any,
-                                time : Time, result : String) : String
-      cfg = @self_config
-      return result unless cfg && cfg.handle == from && to.starts_with?('@')
-      sent = File.join(cfg.project_dir, ".ai", "mail", "sent")
-      return result unless Dir.exists?(sent)
+    # the outbox's: each message the bus took is written into
+    # `.ai/mail/sent/` (dot-ai: both projects keep every message between
+    # them) with its `Id:`, and the result names the file (`sent_file`).
+    # Only when the project has that folder; the result carries the `id`
+    # either way. The message went even if its copy can't be written; the
+    # result then says why (`sent_error`), so the agent can file it itself.
+    private def file_sent(mail : NamedTuple(id: String, name: String, message: String, sent: String?),
+                          re : String?, time : Time, result : String) : String
       h = begin
         JSON.parse(result).as_h?
       rescue JSON::ParseException
@@ -351,21 +372,26 @@ module Arcana
       return result unless h
 
       h = h.dup
-      begin
-        id = h["correlation_id"]?.try(&.as_s?).try(&.presence) || Random::Secure.hex(8)
-        h["sent_file"] = JSON::Any.new(Hook.write_sent(sent, to, subject, payload, time, id))
-      rescue ex
-        h["sent_error"] = JSON::Any.new("couldn't write the sent copy: #{ex.message}")
+      h["id"] = JSON::Any.new(mail[:id])
+      if sent = mail[:sent]
+        begin
+          h["sent_file"] = JSON::Any.new(Hook.write_sent(sent, mail[:name], mail[:message], time, mail[:id], re))
+        rescue ex
+          h["sent_error"] = JSON::Any.new("couldn't write the sent copy: #{ex.message}")
+        end
       end
       h.to_json
     end
 
     private def call_publish(args : JSON::Any) : String
+      re = args.str?("re").try(&.strip.presence)
+      return BAD_RE if re && !re.matches?(Envelope::REPLY_TO)
       body = {
         from:    args.str("from", default_from),
         topic:   args.str("topic"),
         subject: args.str("subject"),
         payload: args["payload"]? || JSON::Any.new(nil),
+        re:      re,
       }.to_json
       http_post("/publish", body)
     end

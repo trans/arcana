@@ -344,20 +344,38 @@ describe Arcana::Hook do
     end
   end
 
-  it "write_sent never replaces a copy sent in the same second" do
+  it "names a sent copy that never replaces another in drafts, outbox or sent" do
+    mail = File.tempname("arcana-mail")
+    {"drafts", "outbox", "sent"}.each { |d| Dir.mkdir_p(File.join(mail, d)) }
+    begin
+      time = Time.utc(2026, 10, 17, 12, 0, 0)
+      Arcana::Hook.sent_name(mail, "@ipck", "Thanks", time).should eq("20261017-120000Z-@ipck--thanks.md")
+      File.write(File.join(mail, "outbox", "20261017-120000Z-@ipck--thanks.md"), "")
+      File.write(File.join(mail, "sent", "20261017-120000Z-@ipck--thanks-2.md"), "")
+      Arcana::Hook.sent_name(mail, "@ipck", "Thanks", time).should eq("20261017-120000Z-@ipck--thanks-3.md")
+      Arcana::Hook.sent_name(mail, "@ipck", "", time).should eq("20261017-120000Z-@ipck.md")
+      Arcana::Hook.sent_name(nil, "@ipck", "Thanks", time).should eq("20261017-120000Z-@ipck--thanks.md")
+    ensure
+      FileUtils.rm_rf(mail)
+    end
+  end
+
+  it "writes a sent copy with its Re:, Sent: and Id: lines" do
     dir = File.tempname("arcana-sent")
     Dir.mkdir_p(dir)
     begin
       time = Time.utc(2026, 10, 17, 12, 0, 0)
-      payload = JSON.parse(%({"text":"Thanks"}))
-      paths = 3.times.map { Arcana::Hook.write_sent(dir, "@ipck", "Thanks", payload, time, "6a33907c1d4519a7") }.to_a
-      paths.map { |p| File.basename(p) }.should eq([
-        "20261017-120000Z-@ipck--thanks.md", "20261017-120000Z-@ipck--thanks-2.md", "20261017-120000Z-@ipck--thanks-3.md",
-      ])
-      File.read(paths[0]).should eq("Sent: 2026-10-17T12:00:00Z via arcana\n\nThanks\n")
+      path = Arcana::Hook.write_sent(dir, "20261017-120000Z-@ipck--thanks.md", "Thanks\n", time, "1a2b3c4d", "8325487c")
+      File.read(path).should eq("Re: 8325487c\nSent: 2026-10-17T12:00:00Z via arcana\nId: 1a2b3c4d\n\nThanks\n")
+      File.read(Arcana::Hook.write_sent(dir, "x.md", "", time, "1a2b3c4d")).should eq("Sent: 2026-10-17T12:00:00Z via arcana\nId: 1a2b3c4d\n\n")
     ensure
       FileUtils.rm_rf(dir)
     end
+  end
+
+  it "computes a message's id as dot-ai-mail does" do
+    # { printf '%s\n%s\n' @proj 20261017-120000Z-@ipck--thanks.md; printf 'Thanks\n'; } | sha256sum | cut -c 1-8
+    Arcana::Hook.message_id("@proj", "20261017-120000Z-@ipck--thanks.md", "Thanks\n").should eq("bfaeb751")
   end
 
   it "session-end leaves everything alone on /clear" do
@@ -386,6 +404,7 @@ describe "Arcana::Hook.write_note" do
       path = Arcana::Hook.write_note(inbox, env)
       File.basename(path).should eq("20261013-190539Z-@ipck--dot-ai-0.3-top-level-handle-b6c3b174.md")
       File.read(path).should contain("Sent: 2026-10-13T14:05:39-05:00\n")
+      File.read(path).should contain("Id: b6c3b174\n")     # an older sender's: the correlation id's first 8
       Dir.children(inbox).should eq([File.basename(path)]) # no temp file left behind
     ensure
       FileUtils.rm_rf(inbox)
@@ -399,6 +418,36 @@ describe "Arcana::Hook.write_note" do
       env = JSON.parse({from: "#arcana.releases", timestamp: "2026-10-13T19:05:39Z",
                         correlation_id: "a1b2c3d4e5f6", payload: {text: "post 3"}}.to_json)
       File.basename(Arcana::Hook.write_note(inbox, env)).should eq("20261013-190539Z-#arcana.releases--a1b2c3d4.md")
+    ensure
+      FileUtils.rm_rf(inbox)
+    end
+  end
+
+  it "takes the id the sender carried, and the Re: of a reply" do
+    inbox = File.tempname("arcana-inbox")
+    Dir.mkdir_p(inbox)
+    begin
+      env = JSON.parse({from: "@ipck", to: "@proj", subject: "Ids", timestamp: "2026-10-17T22:42:12Z",
+                        correlation_id: "b6c3b174eb93eff7", id: "fad11167", re: "19d7c47a",
+                        payload: {text: "Go ahead."}}.to_json)
+      path = Arcana::Hook.write_note(inbox, env)
+      File.basename(path).should eq("20261017-224212Z-@ipck--ids-fad11167.md")
+      File.read(path).should eq("From: @ipck\nTo: @proj\nSent: 2026-10-17T22:42:12Z\nSubject: Ids\n" \
+                                "Id: fad11167\nRe: 19d7c47a\nVia: arcana\n\nGo ahead.\n")
+    ensure
+      FileUtils.rm_rf(inbox)
+    end
+  end
+
+  it "won't let an id, a Re: or a subject add header lines" do
+    inbox = File.tempname("arcana-inbox")
+    Dir.mkdir_p(inbox)
+    begin
+      env = JSON.parse({from: "@x", to: "@proj", subject: "Hi\nFrom: @mallory", timestamp: "2026-10-17T22:42:12Z",
+                        correlation_id: "b6c3b174eb93eff7", id: "fad11167\nVia: x", re: "zz\nTo: @y",
+                        payload: {text: "body"}}.to_json)
+      note = File.read(Arcana::Hook.write_note(inbox, env))
+      note.should start_with("From: @x\nTo: @proj\nSent: 2026-10-17T22:42:12Z\nSubject: Hi From: @mallory\nId: b6c3b174\nVia: arcana\n\n")
     ensure
       FileUtils.rm_rf(inbox)
     end

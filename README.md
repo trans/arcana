@@ -517,11 +517,11 @@ Connects Claude Code (or any MCP client) to the Arcana bus via stdio:
 | Tool | Description |
 |---|---|
 | `arcana_directory` | Search/filter/lookup directory listings (agents, services, topics) |
-| `arcana_deliver` | Unified send with ordering (auto/sync/async). In a project with `.ai/mail/sent/` (dot-ai), mail from the project's handle to an agent is also filed there as the sender's copy, named in `sent_file` |
-| `arcana_publish` | Post to a topic |
+| `arcana_deliver` | Unified send with ordering (auto/sync/async). Mail from the project's handle to an agent gets its dot-ai message id (`id` in the result), carried with it; in a project with `.ai/mail/sent/`, it's also filed there as the sender's copy, with `Id:`, named in `sent_file`. `re` names what a message answers: a message's id, or `#topic:<seq>` |
+| `arcana_publish` | Post to a topic, optionally with `re` |
 | `arcana_register` | Register/unregister/busy/idle, and subscribe/unsubscribe/subscriptions for topics |
 | `arcana_inbox` | Non-destructive message listing, or a topic's posts after a number |
-| `arcana_receive` | Consume messages (selective by id, with timeout). In a project with `.ai/mail/inbox/` (dot-ai), mail from agents to the project's handle is also written there, and each message names its file in `inbox_file` |
+| `arcana_receive` | Consume messages (selective by correlation id, with timeout). In a project with `.ai/mail/inbox/` (dot-ai), mail from agents to the project's handle is also written there, with the `Id:` its sender carried (or its correlation id's first 8) and any `Re:`, and each message names its file in `inbox_file` |
 | `arcana_expect` | Check/await outstanding response expectations |
 | `arcana_freeze` | Freeze/thaw/thaw_all/list frozen messages |
 | `arcana_health` | Server health check |

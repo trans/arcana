@@ -190,6 +190,26 @@ describe Arcana::Server do
     end
   end
 
+  it "carries a message's id and what it answers from /deliver to /receive" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+    server = Arcana::Server.new(bus, dir, port: 14800)
+    server.start_in_background
+
+    begin
+      headers = HTTP::Headers{"Content-Type" => "application/json"}
+      {"@a", "@b"}.each { |a| HTTP::Client.post("http://127.0.0.1:14800/register", headers: headers, body: {address: a, name: a}.to_json) }
+      body = {from: "@a", to: "@b", subject: "hi", payload: {text: "yes"}, ordering: "async",
+              id: "1a2b3c4d", re: "8325487c"}.to_json
+      HTTP::Client.post("http://127.0.0.1:14800/deliver", headers: headers, body: body).status_code.should eq(200)
+      resp = HTTP::Client.post("http://127.0.0.1:14800/receive", headers: headers, body: {address: "@b"}.to_json)
+      msg = JSON.parse(resp.body).as_a[0]
+      {msg["id"].as_s, msg["re"].as_s}.should eq({"1a2b3c4d", "8325487c"})
+    ensure
+      server.stop
+    end
+  end
+
   describe "POST /register listed=false" do
     it "creates a mailbox without adding a directory listing" do
       bus = Arcana::Bus.new

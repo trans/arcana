@@ -868,6 +868,8 @@ module Arcana
         correlation_id: env.str?("correlation_id") || Random::Secure.hex(8),
         reply_to: env.str?("reply_to"),
         ordering: ordering,
+        id: env.str?("id"),
+        re: env.str?("re"),
       )
     end
 
@@ -1053,6 +1055,8 @@ module Arcana
           payload: env["payload"]? || JSON::Any.new(nil),
           correlation_id: env.str?("correlation_id") || Random::Secure.hex(8),
           reply_to: env.str?("reply_to"),
+          id: env.str?("id"),
+          re: env.str?("re"),
         )
       end
     end
