@@ -39,7 +39,7 @@ module Arcana
       },
       {
         name:        "arcana_deliver",
-        description: "Send a message on the Arcana bus. By default (ordering: auto), the bus decides sync vs async based on the target: services get sync (blocks for reply), agents get async (fire and forget, check arcana_receive later). Override with ordering 'sync' or 'async'. The response tells you which mode was used and the correlation_id for tracking.",
+        description: "Send a message on the Arcana bus. By default (ordering: auto), the bus decides sync vs async based on the target: services get sync (blocks for reply), agents get async (fire and forget, check arcana_receive later). Override with ordering 'sync' or 'async'. The response tells you which mode was used and the correlation_id for tracking. In a project with `.ai/mail/sent/` (dot-ai), each message from the project's own handle to an agent is also filed there as the sender's copy, named in the response's `sent_file`: don't file it again.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -308,15 +308,55 @@ module Arcana
 
     private def call_deliver(args : JSON::Any) : String
       ordering = args.str("ordering", "auto")
+      from = args.str("from", default_from)
+      to = args.str("to")
+      subject = args.str("subject")
+      # As the daemon will have it, so the copy filed below says the same.
+      payload = Server.normalize_payload(args["payload"]?)
       body = {
-        from:       args.str("from", default_from),
-        to:         args.str("to"),
-        subject:    args.str("subject"),
-        payload:    args["payload"]? || JSON::Any.new(nil),
+        from:       from,
+        to:         to,
+        subject:    subject,
+        payload:    payload,
         ordering:   ordering,
         timeout_ms: args.int("timeout_ms", 30_000),
       }.to_json
-      http_post("/deliver", body)
+      time = Time.utc
+      resp = request { @http.post("/deliver", headers: json_headers, body: body) }
+      return resp.body unless resp.success?
+      write_sent_file(from, to, subject, payload, time, resp.body)
+    end
+
+    # Mail sent here goes onto the bus without passing through the outbox,
+    # so the bridge files the sender's copy itself, as local delivery files
+    # the outbox's: each message from the project's own handle to an agent
+    # that the bus took is written into `.ai/mail/sent/` (dot-ai: both
+    # projects keep every message between them), and the result names the
+    # file (`sent_file`). Only when the project has that folder. Calls to
+    # services aren't mail and get no file. The message went even if its
+    # copy can't be written; the result then says why (`sent_error`), so
+    # the agent can file it itself.
+    private def write_sent_file(from : String, to : String, subject : String, payload : JSON::Any,
+                                time : Time, result : String) : String
+      cfg = @self_config
+      return result unless cfg && cfg.handle == from && to.starts_with?('@')
+      sent = File.join(cfg.project_dir, ".ai", "mail", "sent")
+      return result unless Dir.exists?(sent)
+      h = begin
+        JSON.parse(result).as_h?
+      rescue JSON::ParseException
+        nil
+      end
+      return result unless h
+
+      h = h.dup
+      begin
+        id = h["correlation_id"]?.try(&.as_s?).try(&.presence) || Random::Secure.hex(8)
+        h["sent_file"] = JSON::Any.new(Hook.write_sent(sent, to, subject, payload, time, id))
+      rescue ex
+        h["sent_error"] = JSON::Any.new("couldn't write the sent copy: #{ex.message}")
+      end
+      h.to_json
     end
 
     private def call_publish(args : JSON::Any) : String
@@ -616,9 +656,13 @@ module Arcana
     end
 
     private def http_post(path : String, body : String) : String
+      request { @http.post(path, headers: json_headers, body: body) }.body
+    end
+
+    private def json_headers : HTTP::Headers
       headers = auth_headers
       headers["Content-Type"] = "application/json"
-      request { @http.post(path, headers: headers, body: body) }.body
+      headers
     end
 
     # One request on the keep-alive connection. When the daemon restarts,

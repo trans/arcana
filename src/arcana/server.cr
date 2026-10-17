@@ -864,7 +864,7 @@ module Arcana
         from: env.str("from"),
         to: env.str("to"),
         subject: env.str("subject"),
-        payload: normalize_payload(env["payload"]?),
+        payload: Server.normalize_payload(env["payload"]?),
         correlation_id: env.str?("correlation_id") || Random::Secure.hex(8),
         reply_to: env.str?("reply_to"),
         ordering: ordering,
@@ -878,8 +878,9 @@ module Arcana
     # (openai:tts, anthropic:chat, ...) look for their fields at the top
     # level of the payload, don't find them, and reply "missing required
     # fields." Auto-unwrap looks-like-JSON strings back to real objects.
-    # A literal string payload like `"hello"` stays a string.
-    private def normalize_payload(raw : JSON::Any?) : JSON::Any
+    # A literal string payload like `"hello"` stays a string. The MCP
+    # bridge does the same before filing its copy of a message it sends.
+    def self.normalize_payload(raw : JSON::Any?) : JSON::Any
       return JSON::Any.new(nil) if raw.nil?
       if s = raw.as_s?
         stripped = s.lstrip

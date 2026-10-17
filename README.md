@@ -517,7 +517,7 @@ Connects Claude Code (or any MCP client) to the Arcana bus via stdio:
 | Tool | Description |
 |---|---|
 | `arcana_directory` | Search/filter/lookup directory listings (agents, services, topics) |
-| `arcana_deliver` | Unified send with ordering (auto/sync/async) |
+| `arcana_deliver` | Unified send with ordering (auto/sync/async). In a project with `.ai/mail/sent/` (dot-ai), mail from the project's handle to an agent is also filed there as the sender's copy, named in `sent_file` |
 | `arcana_publish` | Post to a topic |
 | `arcana_register` | Register/unregister/busy/idle, and subscribe/unsubscribe/subscriptions for topics |
 | `arcana_inbox` | Non-destructive message listing, or a topic's posts after a number |

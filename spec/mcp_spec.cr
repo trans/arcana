@@ -146,4 +146,83 @@ describe Arcana::MCP do
       })
     end
   end
+
+  describe "arcana_deliver" do
+    # The tool's result, for `arguments` as JSON.
+    result_of = ->(mcp : Arcana::MCP, arguments : String) {
+      msg = JSON.parse(%({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"arcana_deliver","arguments":#{arguments}}}))
+      JSON.parse(mcp.test_handle(msg).not_nil!["result"]["content"][0]["text"].as_s)
+    }
+
+    # A daemon whose /deliver answers with `status` and `reply`, and
+    # keeps the bodies it was sent.
+    with_project = ->(sent : Bool, status : Int32, reply : String, block : Proc(Arcana::MCP, String, Array(JSON::Any), Nil)) {
+      bodies = [] of JSON::Any
+      tcp = TCPServer.new("127.0.0.1", 0)
+      spawn do
+        while client = tcp.accept?
+          if (req = HTTP::Request.from_io(client)).is_a?(HTTP::Request)
+            bodies << JSON.parse(req.body.try(&.gets_to_end) || "null")
+            client << "HTTP/1.1 #{status} X\r\nContent-Type: application/json\r\nContent-Length: #{reply.bytesize}\r\n\r\n#{reply}"
+            client.flush
+          end
+          client.close
+        end
+      end
+      dir = File.tempname("arcana-mcp-proj")
+      Dir.mkdir_p(File.join(dir, ".ai"))
+      File.write(File.join(dir, ".ai", "config.yml"), "handle: proj\n")
+      Dir.mkdir_p(File.join(dir, ".ai", "mail", "sent")) if sent
+      begin
+        block.call(Arcana::MCP.new(base_url: "http://127.0.0.1:#{tcp.local_address.port}", project_dir: dir), dir, bodies)
+      ensure
+        tcp.close
+        FileUtils.rm_rf(dir)
+      end
+    }
+    ok = %({"ok":true,"ordering":"async","correlation_id":"6a33907c1d4519a7"})
+
+    it "files mail to an agent under sent/ and names the file" do
+      with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
+        result = result_of.call(mcp, {to: "@ipck", subject: "Message ids", payload: {text: "Carry the id?\n", seq: 3}}.to_json)
+        result["correlation_id"].should eq("6a33907c1d4519a7")
+        path = result["sent_file"].as_s
+        File.dirname(path).should eq(File.join(dir, ".ai", "mail", "sent"))
+        File.basename(path).should match(/\A\d{8}-\d{6}Z-@ipck--message-ids\.md\z/)
+        File.read(path).should match(/\ASent: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ via arcana\n\n/)
+        File.read(path).should end_with("\n\nCarry the id?\n\n```json\n{\n  \"seq\": 3\n}\n```\n")
+        bodies[0]["from"].should eq("@proj")
+        nil
+      })
+    end
+
+    it "files the message the bus got, when the payload came as a JSON string" do
+      with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
+        result = result_of.call(mcp, {to: "@ipck", payload: %({"text":"hi"})}.to_json)
+        bodies[0]["payload"].should eq(JSON.parse(%({"text":"hi"})))
+        File.basename(result["sent_file"].as_s).should match(/\A\d{8}-\d{6}Z-@ipck--6a33907c\.md\z/)
+        File.read(result["sent_file"].as_s).should end_with(" via arcana\n\nhi\n")
+        nil
+      })
+    end
+
+    it "files nothing for a service, another sender, a failed delivery, or without sent/" do
+      with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
+        result_of.call(mcp, {to: "openai", subject: "chat"}.to_json)["sent_file"]?.should be_nil
+        result_of.call(mcp, {to: "@ipck", from: "@other"}.to_json)["sent_file"]?.should be_nil
+        Dir.children(File.join(dir, ".ai", "mail", "sent")).should be_empty
+        nil
+      })
+      with_project.call(true, 404, %({"error":"no mailbox for @nobody"}), ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
+        result_of.call(mcp, {to: "@nobody"}.to_json)["error"].should eq("no mailbox for @nobody")
+        Dir.children(File.join(dir, ".ai", "mail", "sent")).should be_empty
+        nil
+      })
+      with_project.call(false, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
+        result_of.call(mcp, {to: "@ipck"}.to_json)["sent_file"]?.should be_nil
+        Dir.exists?(File.join(dir, ".ai", "mail")).should be_false
+        nil
+      })
+    end
+  end
 end

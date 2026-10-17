@@ -257,6 +257,22 @@ describe Arcana::Hook do
     end
   end
 
+  it "write_sent never replaces a copy sent in the same second" do
+    dir = File.tempname("arcana-sent")
+    Dir.mkdir_p(dir)
+    begin
+      time = Time.utc(2026, 10, 17, 12, 0, 0)
+      payload = JSON.parse(%({"text":"Thanks"}))
+      paths = 3.times.map { Arcana::Hook.write_sent(dir, "@ipck", "Thanks", payload, time, "6a33907c1d4519a7") }.to_a
+      paths.map { |p| File.basename(p) }.should eq([
+        "20261017-120000Z-@ipck--thanks.md", "20261017-120000Z-@ipck--thanks-2.md", "20261017-120000Z-@ipck--thanks-3.md",
+      ])
+      File.read(paths[0]).should eq("Sent: 2026-10-17T12:00:00Z via arcana\n\nThanks\n")
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "session-end leaves everything alone on /clear" do
     with_clean_env do
       with_bus(14615) do |directory|

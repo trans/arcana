@@ -181,7 +181,7 @@ module Arcana
     # id: `20261013-190539Z-@ipck--dot-ai-0.3-b6c3b174.md`, or
     # `<time>-<sender>--<id8>.md` without a subject. Written here at
     # session end, and by the MCP bridge's `arcana_receive` (see
-    # `MCP#write_inbox_files`).
+    # `MCP#write_inbox_files`). `write_sent` files the sender's copy.
     def self.write_note(inbox : String, env : JSON::Any) : String
       from = env["from"]?.try(&.as_s?) || "unknown"
       to = env["to"]?.try(&.as_s?) || ""
@@ -190,7 +190,7 @@ module Arcana
       id = env["correlation_id"]?.try(&.as_s?).try(&.presence) || Random::Secure.hex(8)
       time = sent.try { |t| Time.parse_rfc3339(t) rescue nil } || Time.utc
 
-      text, rest = split_payload(env["payload"]?)
+      body = mail_body(env["payload"]?)
       note = String.build do |io|
         io << "From: " << from << "\n"
         io << "To: " << to << "\n" unless to.empty?
@@ -198,20 +198,45 @@ module Arcana
         io << "Subject: " << subject << "\n" if subject
         io << "Id: " << id << "\n"
         io << "Via: arcana\n"
-        io << "\n" << text.strip << "\n" if text
-        if rest
-          io << "\n```json\n" << rest.to_pretty_json << "\n```\n"
-        end
+        io << "\n" << body if body
       end
 
-      # `#` stays, so a topic's notification is named by the topic.
-      sender = from.gsub(/[^@#a-zA-Z0-9_.-]+/, "-").gsub(/-{2,}/, "-").strip('-')
-      sender = "unknown" if sender.empty?
       tail = [mail_topic(subject), id[0, 8]].compact.join('-')
-      name = "#{time.to_utc.to_s("%Y%m%d-%H%M%SZ")}-#{sender}--#{tail}.md"
-      path = File.join(inbox, name)
-      # Readers skip hidden names, so no one reads half a message.
-      tmp = File.join(inbox, ".#{name}")
+      name = "#{time.to_utc.to_s("%Y%m%d-%H%M%SZ")}-#{name_address(from)}--#{tail}.md"
+      write_mail(inbox, name, note)
+    end
+
+    # The sender's copy of a message sent over the bus, filed in `sent/` as
+    # local delivery files the outbox's (dot-ai draft 0.3): named by the
+    # time it was sent in UTC, the recipient and the subject as a topic
+    # (`20261017-120000Z-@ipck--message-ids.md`), or the first 8
+    # characters of its id without a subject, holding a `Sent:` line, a
+    # blank line, then the message. Never replaces a file: a second
+    # message to the same address and topic in the same second gets `-2`.
+    def self.write_sent(sent : String, to : String, subject : String?, payload : JSON::Any?,
+                        time : Time, id : String) : String
+      time = time.to_utc
+      note = "Sent: #{time.to_rfc3339} via arcana\n\n#{mail_body(payload)}"
+      base = "#{time.to_s("%Y%m%d-%H%M%SZ")}-#{name_address(to)}--#{mail_topic(subject) || id[0, 8]}"
+      name = "#{base}.md"
+      n = 1
+      while File.exists?(File.join(sent, name))
+        name = "#{base}-#{n += 1}.md"
+      end
+      write_mail(sent, name, note)
+    end
+
+    # An address as a file name has it. `#` stays, so a topic's
+    # notification is named by the topic.
+    private def self.name_address(address : String) : String
+      name = address.gsub(/[^@#a-zA-Z0-9_.-]+/, "-").gsub(/-{2,}/, "-").strip('-')
+      name.empty? ? "unknown" : name
+    end
+
+    # Readers skip hidden names, so no one reads half a message.
+    private def self.write_mail(dir : String, name : String, note : String) : String
+      path = File.join(dir, name)
+      tmp = File.join(dir, ".#{name}")
       File.write(tmp, note)
       File.rename(tmp, path)
       path
@@ -223,6 +248,18 @@ module Arcana
     def self.mail_topic(subject : String?) : String?
       return nil unless subject
       subject.downcase.gsub(/[^a-z0-9.-]+/, "-").strip('-')[0, 50].rstrip('-').presence
+    end
+
+    # A message as a mail file holds it, after the header lines and their
+    # blank line: its text, then anything else the payload carries as a
+    # JSON block. Nil for an empty payload. The sender's copy in `sent/`
+    # (`MCP#write_sent_file`) and the recipient's inbox file hold the same.
+    def self.mail_body(payload : JSON::Any?) : String?
+      text, rest = split_payload(payload)
+      parts = [] of String
+      parts << "#{text.strip}\n" if text
+      parts << "```json\n#{rest.to_pretty_json}\n```\n" if rest
+      parts.empty? ? nil : parts.join("\n")
     end
 
     # The message text (a string payload, or its `text`/`message` field)
