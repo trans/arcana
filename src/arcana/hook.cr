@@ -38,12 +38,13 @@ module Arcana
       rescue
         JSON.parse("{}")
       end
-      project_dir = AgentConfig.project_root(ENV["CLAUDE_PROJECT_DIR"]?.try(&.presence) ||
-                                             payload["cwd"]?.try(&.as_s?).try(&.presence) || Dir.current)
+      start = ENV["CLAUDE_PROJECT_DIR"]?.try(&.presence) ||
+              payload["cwd"]?.try(&.as_s?).try(&.presence) || Dir.current
+      project_dir = AgentConfig.project_root(start)
 
       bus = Rest.new(base_url)
       case event
-      when "session-start" then session_start(bus, project_dir, output)
+      when "session-start" then session_start(bus, project_dir, output, AgentConfig.broken_link(start))
       when "stop"          then stop(bus, project_dir, agent, payload, output, error)
       else                      session_end(bus, project_dir, payload)
       end
@@ -54,11 +55,20 @@ module Arcana
 
     # -- session-start --
 
-    def self.session_start(bus : Rest, project_dir : String, output : IO) : Int32
+    # `broken_link` is an `.ai` link on the way to the project whose target
+    # is gone (`AgentConfig.broken_link`): the agent is told, whether or not
+    # the bus is up, since it means the session is likely in the wrong
+    # project.
+    def self.session_start(bus : Rest, project_dir : String, output : IO, broken_link : String? = nil) : Int32
+      warning = broken_link.try do |link|
+        "Warning: #{link} is a link to #{File.readlink(link)}, which doesn't exist, so this session " \
+        "isn't in the project the link was meant to lead to: it is in #{project_dir}. " \
+        "Tell the user; the link needs fixing."
+      end
       cfg = begin
         AgentConfig.load(project_dir)
       rescue ex : AgentConfig::Error
-        emit_context(output, "SessionStart", "Arcana: not registered: #{ex.message}")
+        emit_context(output, "SessionStart", [warning, "Arcana: not registered: #{ex.message}"].compact.join("\n"))
         return 0
       end
 
@@ -68,14 +78,17 @@ module Arcana
         description: cfg.description,
         owner_token: cfg.owner_token!,
       })
-      return 0 unless status && body # bus not running
+      unless status && body # bus not running
+        emit_context(output, "SessionStart", warning) if warning
+        return 0
+      end
 
       text = case status
              when 200 then registered_text(cfg, bus, body)
              when 409 then held_text(cfg, body)
              else          "Arcana: registering #{cfg.handle} failed: #{body["error"]?.try(&.as_s?) || "status #{status}"}"
              end
-      emit_context(output, "SessionStart", text)
+      emit_context(output, "SessionStart", [warning, text].compact.join("\n"))
       0
     end
 

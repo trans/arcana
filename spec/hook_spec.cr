@@ -117,6 +117,30 @@ describe Arcana::AgentConfig do
     end
   end
 
+  it "finds a group folder's project through its .ai link, and spots a broken link" do
+    project(CONFIG) do |dir|
+      group = File.join(dir, "group")
+      main = File.join(group, "main")
+      core = File.join(group, "core")
+      Dir.mkdir_p(File.join(main, ".ai"))
+      File.write(File.join(main, ".ai", "config.yml"), "handle: main\n")
+      Dir.mkdir_p(core)
+      File.symlink("main/.ai", File.join(group, ".ai"))
+
+      Arcana::AgentConfig.project_root(core).should eq(File.realpath(group))
+      cfg = Arcana::AgentConfig.find(core)
+      cfg.handle.should eq("@main")
+      File.realpath(cfg.token_path.sub(/arcana\.token\z/, "")).should eq(File.realpath(File.join(main, ".ai")))
+      Arcana::AgentConfig.broken_link(core).should be_nil
+
+      # The repository renamed: the link leads nowhere, so the walk goes on up.
+      File.rename(main, File.join(group, "renamed"))
+      Arcana::AgentConfig.project_root(core).should eq(File.realpath(dir))
+      Arcana::AgentConfig.broken_link(core).should eq(File.join(File.realpath(group), ".ai"))
+      Arcana::AgentConfig.broken_link(dir).should be_nil
+    end
+  end
+
   it "raises on a config it can't parse instead of falling back" do
     project("arcana: [unclosed\n") do |dir|
       expect_raises(Arcana::AgentConfig::Error, /can't read/) { Arcana::AgentConfig.load(dir) }
@@ -212,6 +236,24 @@ describe Arcana::Hook do
           File.exists?(File.join(dir, ".ai", "arcana.token")).should be_true
           Arcana::MCP.new(project_dir: sub).self_config.not_nil!.handle.should eq("@proj")
         end
+      end
+    end
+  end
+
+  it "session-start warns of a broken .ai link on the way, with the bus up or down" do
+    with_clean_env do
+      project(CONFIG) do |dir|
+        group = File.join(dir, "group")
+        Dir.mkdir_p(File.join(group, "core"))
+        File.symlink("gone/.ai", File.join(group, ".ai"))
+        with_bus(14620) do
+          _, stdout, _ = hook(14620, File.join(group, "core"), "session-start")
+          context = JSON.parse(stdout)["hookSpecificOutput"]["additionalContext"].as_s
+          context.should start_with("Warning: #{File.realpath(group)}/.ai is a link to gone/.ai, which doesn't exist")
+          context.should contain("You are @proj on the Arcana bus")
+        end
+        _, stdout, _ = hook(14621, File.join(group, "core"), "session-start")
+        JSON.parse(stdout)["hookSpecificOutput"]["additionalContext"].as_s.should start_with("Warning:")
       end
     end
   end

@@ -62,13 +62,40 @@ module Arcana
     # Walks the path with symbolic links resolved, as dot-ai-mail does, so
     # both find the same project. With no `.ai/` anywhere above, `dir`
     # itself, whose handle is then the fallback.
+    #
+    # `.ai` may be a symbolic link to another project's `.ai/`: a folder
+    # grouping several repositories under one project links to the `.ai/`
+    # of the repository that holds it, and a session in any of them finds
+    # that project through the link.
     def self.project_root(dir : String) : String
-      start = Path[(File.realpath(dir) rescue File.expand_path(dir))]
+      start = resolve(dir)
+      ancestors(start) { |path| return path.to_s if Dir.exists?(path.join(".ai").to_s) }
+      start.to_s
+    end
+
+    # An `.ai` link on the way from `dir` to its project whose target is
+    # gone. The walk passes it as if it weren't there, so a session it
+    # should have led to a project lands in the one above, or in none.
+    def self.broken_link(dir : String) : String?
+      ancestors(resolve(dir)) do |path|
+        ai = path.join(".ai").to_s
+        return nil if Dir.exists?(ai)
+        return ai if File.symlink?(ai)
+      end
+      nil
+    end
+
+    private def self.resolve(dir : String) : Path
+      Path[(File.realpath(dir) rescue File.expand_path(dir))]
+    end
+
+    # `start`, then each directory above it, up to `/`.
+    private def self.ancestors(start : Path, &) : Nil
       path = start
       loop do
-        return path.to_s if Dir.exists?(path.join(".ai").to_s)
+        yield path
         parent = path.parent
-        return start.to_s if parent == path
+        break if parent == path
         path = parent
       end
     end
