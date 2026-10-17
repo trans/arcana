@@ -169,14 +169,15 @@ module Arcana
       },
     ]
 
-    # This project's identity, from `.ai/config.yml` in the directory the
-    # agent started the bridge in (see `AgentConfig`). Lets the bridge
+    # This project's identity, from `.ai/config.yml` in the nearest
+    # directory with `.ai/` at or above where the agent started the bridge
+    # (see `AgentConfig.find`). Lets the bridge
     # default `from` to the agent's handle and supply its owner token.
     getter self_config : AgentConfig?
 
     def initialize(@base_url : String = "http://127.0.0.1:19118", @api_key : String? = nil,
                    project_dir : String? = ENV["CLAUDE_PROJECT_DIR"]?.try(&.presence) || Dir.current)
-      @self_config = project_dir.try { |d| AgentConfig.load(d) rescue nil }
+      @self_config = project_dir.try { |d| AgentConfig.find(d) rescue nil }
       uri = URI.parse(@base_url)
       @http = HTTP::Client.new(uri)  # persistent keep-alive connection
       @http_mutex = Mutex.new         # HTTP::Client is not fiber-safe for concurrent use

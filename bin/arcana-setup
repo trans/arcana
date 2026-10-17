@@ -11,7 +11,8 @@
 #      if the `claude` CLI is available
 #
 # Nothing is per-project — the hooks read each project's .ai/config.yml
-# at hook time (falling back to @<directory name>), so one setup covers
+# at hook time (the nearest .ai/ at or above the session's directory;
+# without one, @<directory name>), so one setup covers
 # every project. Codex gets the same hooks when ~/.codex exists.
 #
 # Usage:
@@ -77,7 +78,8 @@ echo ""
 #
 # Each hook is a one-line wrapper around `arcana hook <event>`, which does
 # the work for both agents: the handle and description come from the
-# project's .ai/config.yml (falling back to @<directory name>), the
+# project's .ai/config.yml (the nearest .ai/ above the session; without
+# one, @<directory name>), the
 # registration carries the project's owner token, session start tells the
 # agent who it is on the bus, and session end moves unread mail into
 # .ai/mail/inbox/ and marks the handle offline instead of unregistering it.

@@ -8,7 +8,8 @@ module Arcana
   # off the same way. Reads the hook's JSON payload on stdin.
   #
   # - `session-start`: registers the project's handle (from
-  #   `.ai/config.yml`) under its owner token, and tells the agent, in its
+  #   `.ai/config.yml` in the nearest directory with `.ai/`, see
+  #   `AgentConfig.project_root`) under its owner token, and tells the agent, in its
   #   context, who it is on the bus and that a "held" handle is its own.
   # - `stop`: asks the agent to read waiting mail before it stops, once
   #   per change in the count.
@@ -37,8 +38,8 @@ module Arcana
       rescue
         JSON.parse("{}")
       end
-      project_dir = ENV["CLAUDE_PROJECT_DIR"]?.try(&.presence) ||
-                    payload["cwd"]?.try(&.as_s?).try(&.presence) || Dir.current
+      project_dir = AgentConfig.project_root(ENV["CLAUDE_PROJECT_DIR"]?.try(&.presence) ||
+                                             payload["cwd"]?.try(&.as_s?).try(&.presence) || Dir.current)
 
       bus = Rest.new(base_url)
       case event

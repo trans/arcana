@@ -14,6 +14,10 @@ module Arcana
   # top-level keys are missing. Without a handle anywhere, the handle falls
   # back to `@` plus the project directory's name.
   #
+  # A session's project is the nearest directory at or above where it
+  # works that holds `.ai/` (`find`, `project_root`); only where there is
+  # none is the session's own directory the project.
+  #
   # The owner token proves to the bus that a registration is this
   # project's (see `Directory#claim`). It lives in `.ai/arcana.token`,
   # kept out of git through the repository's `info/exclude` since it only
@@ -50,6 +54,28 @@ module Arcana
       end
       handle = handle ? (handle.starts_with?('@') ? handle : "@#{handle}") : fallback_handle(project_dir)
       new(project_dir, handle, description || "")
+    end
+
+    # The project a session in `dir` works in (dot-ai, "Projects inside
+    # projects"): the nearest directory at or above it that holds `.ai/`,
+    # since a directory without one belongs to the project above it.
+    # Walks the path with symbolic links resolved, as dot-ai-mail does, so
+    # both find the same project. With no `.ai/` anywhere above, `dir`
+    # itself, whose handle is then the fallback.
+    def self.project_root(dir : String) : String
+      start = Path[(File.realpath(dir) rescue File.expand_path(dir))]
+      path = start
+      loop do
+        return path.to_s if Dir.exists?(path.join(".ai").to_s)
+        parent = path.parent
+        return start.to_s if parent == path
+        path = parent
+      end
+    end
+
+    # `load` for the project a session in `dir` works in (`project_root`).
+    def self.find(dir : String) : AgentConfig
+      load(project_root(dir))
     end
 
     private def self.string_key(map : Hash(YAML::Any, YAML::Any)?, key : String) : String?

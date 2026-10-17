@@ -88,6 +88,35 @@ describe Arcana::AgentConfig do
     project { |dir| Arcana::AgentConfig.load(dir).handle.should eq(Arcana::AgentConfig.fallback_handle(dir)) }
   end
 
+  it "finds a session's project in the nearest directory with .ai/" do
+    project(CONFIG) do |dir|
+      deep = File.join(dir, "sub", "deeper")
+      own = File.join(dir, "sub", "own")
+      Dir.mkdir_p(deep)
+      Dir.mkdir_p(File.join(own, ".ai"))
+      link = "#{dir}-link"
+      File.symlink(deep, link)
+      begin
+        real = File.realpath(dir)
+        Arcana::AgentConfig.project_root(deep).should eq(real)
+        Arcana::AgentConfig.project_root(link).should eq(real) # walked as dot-ai-mail walks it
+        Arcana::AgentConfig.project_root(own).should eq(File.realpath(own))
+        Arcana::AgentConfig.find(deep).handle.should eq("@proj")
+      ensure
+        File.delete(link)
+      end
+    end
+    # No .ai/ anywhere above: the directory itself, with the fallback handle.
+    lone = File.tempname("arcana-lone")
+    Dir.mkdir_p(lone)
+    begin
+      Arcana::AgentConfig.project_root(lone).should eq(File.realpath(lone))
+      Arcana::AgentConfig.find(lone).handle.should eq(Arcana::AgentConfig.fallback_handle(lone))
+    ensure
+      FileUtils.rm_rf(lone)
+    end
+  end
+
   it "raises on a config it can't parse instead of falling back" do
     project("arcana: [unclosed\n") do |dir|
       expect_raises(Arcana::AgentConfig::Error, /can't read/) { Arcana::AgentConfig.load(dir) }
@@ -166,6 +195,22 @@ describe Arcana::Hook do
           # The next session finds it already theirs.
           _, stdout, _ = hook(14610, dir, "session-start", "--agent", "codex")
           JSON.parse(stdout)["hookSpecificOutput"]["additionalContext"].as_s.should contain("already registered under this project's owner token")
+        end
+      end
+    end
+  end
+
+  it "a session in a directory without .ai/ is the project above it" do
+    with_clean_env do
+      with_bus(14616) do |directory|
+        project(CONFIG) do |dir|
+          sub = File.join(dir, "lib", "part")
+          Dir.mkdir_p(sub)
+          _, stdout, _ = hook(14616, sub, "session-start", "--agent", "codex")
+          JSON.parse(stdout)["hookSpecificOutput"]["additionalContext"].as_s.should contain("You are @proj on the Arcana bus")
+          directory.lookup("@part").should be_nil
+          File.exists?(File.join(dir, ".ai", "arcana.token")).should be_true
+          Arcana::MCP.new(project_dir: sub).self_config.not_nil!.handle.should eq("@proj")
         end
       end
     end
