@@ -261,7 +261,7 @@ result = provider.embed(request)
 
 result.embeddings       # => Array(Array(Float64))
 result.dimensions       # => 1536
-result.total_tokens     # => token count
+result.usage            # => what the call used (nil when unreported)
 ```
 
 ## Markdown
