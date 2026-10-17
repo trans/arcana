@@ -203,14 +203,19 @@ describe Arcana::Hook do
           send_mail(14612, "@proj", "hi", {text: "hello"})
           code, _, err = hook(14612, dir, "stop", "--agent", "claude")
           code.should eq(2)
-          err.should contain("You have mail! (1 message)")
+          err.should contain("You have mail! (1 message on the Arcana bus for @proj")
+          # Left for later: not again, however many turns go by.
           hook(14612, dir, "stop", "--agent", "claude")[0].should eq(0)
+          hook(14612, dir, "stop", "--agent", "claude")[0].should eq(0)
+
+          send_mail(14612, "@proj", "more", {text: "and this"})
+          hook(14612, dir, "stop", "--agent", "claude")[0].should eq(2)
         end
       end
     end
   end
 
-  it "stop blocks a Codex agent unless it is already continuing" do
+  it "stop blocks a Codex agent once per count" do
     with_clean_env do
       with_bus(14613) do
         project(CONFIG) do |dir|
@@ -219,6 +224,8 @@ describe Arcana::Hook do
           _, stdout, _ = hook(14613, dir, "stop", "--agent", "codex")
           JSON.parse(stdout)["decision"].should eq("block")
           _, stdout, _ = hook(14613, dir, "stop", "--agent", "codex", payload: {"stop_hook_active" => JSON::Any.new(true)})
+          stdout.strip.should eq("{}")
+          _, stdout, _ = hook(14613, dir, "stop", "--agent", "codex")
           stdout.strip.should eq("{}")
         end
       end

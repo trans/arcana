@@ -117,36 +117,29 @@ module Arcana
 
     # -- stop --
 
+    # Keeps the agent going once per change in the count, so mail it
+    # leaves for later never loops it: Claude by exit 2 (stderr is shown to
+    # the agent), Codex by `decision: block`.
     def self.stop(bus : Rest, project_dir : String, agent : String, payload : JSON::Any,
                   output : IO, error : IO) : Int32
       handle = AgentConfig.load(project_dir).handle
-      if agent == "codex"
-        if payload["stop_hook_active"]?.try(&.as_bool?)
-          output.puts "{}"
-          return 0
-        end
-        pending = bus.pending(handle) || 0
-        if pending > 0
-          reason = "You have Arcana mail (#{pending} pending message#{pending == 1 ? "" : "s"}). " \
-                   "Receive the pending mail for #{handle} before stopping."
-          output.puts({decision: "block", reason: reason}.to_json)
-        else
-          output.puts "{}"
-        end
+      pending = bus.pending(handle) || 0
+      flag = mail_flag(handle)
+      told = File.exists?(flag) && File.read(flag).strip == pending.to_s
+      if pending == 0 || told
+        File.delete(flag) if pending == 0 && File.exists?(flag)
+        output.puts "{}" if agent == "codex"
         return 0
       end
 
-      # Claude: exit 2 shows stderr to the agent and keeps it going. Only
-      # once per pending count, or an unread message would loop forever.
-      pending = bus.pending(handle) || 0
-      return 0 if pending == 0
-      flag = mail_flag(handle)
-      if File.exists?(flag) && File.read(flag).strip == pending.to_s
-        File.delete(flag)
+      File.write(flag, pending.to_s)
+      text = "You have mail! (#{pending} message#{pending == 1 ? "" : "s"} on the Arcana bus " \
+             "for #{handle}: arcana_inbox, then arcana_receive.)"
+      if agent == "codex"
+        output.puts({decision: "block", reason: text}.to_json)
         return 0
       end
-      File.write(flag, pending.to_s)
-      error.puts "You have mail! (#{pending} message#{pending == 1 ? "" : "s"})"
+      error.puts text
       2
     end
 
