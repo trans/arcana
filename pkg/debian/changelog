@@ -1,3 +1,16 @@
+arcana (0.36.2-1) unstable; urgency=medium
+
+  * The MCP bridge refuses an argument a tool doesn't take, naming it and
+    the ones it does take, instead of dropping it. An agent that passed
+    its message to `arcana_deliver` as `message` sent an empty message
+    and was told it went; now it's told the message goes in `payload`
+    (for mail, {"text": "..."}) and its subject in `subject`, and
+    nothing is sent.
+  * `arcana_deliver` refuses mail to an agent with neither a subject nor
+    anything in its payload.
+
+ -- trans <transfire@gmail.com>  Wed, 21 Oct 2026 20:30:00 +0000
+
 arcana (0.36.1-1) unstable; urgency=medium
 
   * Built on arcana-ai 0.6.1. The daemon's `openai` `tts` tool waits up
