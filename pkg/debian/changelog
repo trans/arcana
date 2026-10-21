@@ -1,3 +1,12 @@
+arcana (0.36.1-1) unstable; urgency=medium
+
+  * Built on arcana-ai 0.6.1. The daemon's `openai` `tts` tool waits up
+    to 120 s for speech instead of 60: OpenAI sends gpt-4o-mini-tts's
+    audio only once the clip is done, which has taken over a minute
+    for a few seconds of speech.
+
+ -- trans <transfire@gmail.com>  Wed, 21 Oct 2026 20:26:00 +0000
+
 arcana (0.36.0-1) unstable; urgency=medium
 
   * Mail sent over the bus has its dot-ai message id, the same on the
