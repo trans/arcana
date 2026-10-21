@@ -56,6 +56,13 @@ describe Arcana::MCP do
     response.should_not be_nil
     response.not_nil!["error"]["code"].as_i.should eq(-32601)
   end
+  it "refuses an argument a tool doesn't take" do
+    mcp = Arcana::MCP.new
+    msg = JSON.parse(%({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"arcana_inbox","arguments":{"adress":"@t"}}}))
+    error = JSON.parse(mcp.test_handle(msg).not_nil!["result"]["content"][0]["text"].as_s)["error"].as_s
+    error.should eq("arcana_inbox takes no argument `adress`; it takes address, token, after, limit. Nothing was done.")
+  end
+
   it "reconnects when the daemon drops its connection" do
     # Answers each request, then closes the socket without saying so, as
     # a daemon that restarts does to a kept-alive connection.
@@ -220,6 +227,31 @@ describe Arcana::MCP do
       })
     end
 
+    it "refuses an argument it doesn't take, saying where the message goes, and sends nothing" do
+      with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
+        error = result_of.call(mcp, {from: "@proj", to: "@overlore", ordering: "async", message: "Subject: Caddy\n\nNothing is in front of it."}.to_json)["error"].as_s
+        error.should contain("takes no argument `message`")
+        error.should contain("goes in `payload`")
+        error.should contain("Nothing was sent.")
+        bodies.should be_empty
+        Dir.children(File.join(dir, ".ai", "mail", "sent")).should be_empty
+        nil
+      })
+    end
+
+    it "refuses mail with nothing in it, but not a call to a service" do
+      with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
+        [{to: "@ipck"}, {to: "@ipck", payload: " "}, {to: "@ipck", payload: {} of String => String}, {to: "@ipck", payload: "{}"}].each do |args|
+          result_of.call(mcp, args.to_json)["error"].as_s.should start_with("Nothing to send")
+        end
+        bodies.should be_empty
+        result_of.call(mcp, {to: "@ipck", subject: "Done"}.to_json)["ok"].should eq(true)
+        result_of.call(mcp, {to: "arcana"}.to_json)["ok"].should eq(true)
+        bodies.size.should eq(2)
+        nil
+      })
+    end
+
     it "refuses a re that is neither a message's id nor a topic's post" do
       with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
         result_of.call(mcp, {to: "@ipck", re: "not an id", payload: {text: "x"}}.to_json)["error"].as_s.should contain("re must be")
@@ -242,18 +274,18 @@ describe Arcana::MCP do
     it "files nothing for a service, another sender, a failed delivery, or without sent/" do
       with_project.call(true, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
         result_of.call(mcp, {to: "openai", subject: "chat"}.to_json)["sent_file"]?.should be_nil
-        result_of.call(mcp, {to: "@ipck", from: "@other"}.to_json)["sent_file"]?.should be_nil
+        result_of.call(mcp, {to: "@ipck", from: "@other", payload: {text: "hi"}}.to_json)["sent_file"]?.should be_nil
         bodies.each { |b| b["id"].raw.should be_nil } # neither is mail
         Dir.children(File.join(dir, ".ai", "mail", "sent")).should be_empty
         nil
       })
       with_project.call(true, 404, %({"error":"no mailbox for @nobody"}), ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
-        result_of.call(mcp, {to: "@nobody"}.to_json)["error"].should eq("no mailbox for @nobody")
+        result_of.call(mcp, {to: "@nobody", payload: {text: "hi"}}.to_json)["error"].should eq("no mailbox for @nobody")
         Dir.children(File.join(dir, ".ai", "mail", "sent")).should be_empty
         nil
       })
       with_project.call(false, 200, ok, ->(mcp : Arcana::MCP, dir : String, bodies : Array(JSON::Any)) {
-        result_of.call(mcp, {to: "@ipck"}.to_json)["sent_file"]?.should be_nil
+        result_of.call(mcp, {to: "@ipck", payload: {text: "hi"}}.to_json)["sent_file"]?.should be_nil
         Dir.exists?(File.join(dir, ".ai", "mail")).should be_false
         nil
       })

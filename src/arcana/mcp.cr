@@ -46,7 +46,7 @@ module Arcana
             from:       {type: "string", description: "Your address on the bus (so replies come back to you). Defaults to this project's handle."},
             to:         {type: "string", description: "Target address on the bus"},
             subject:    {type: "string", description: "Message subject/intent"},
-            payload:    {description: "Message payload — pass a JSON OBJECT with the fields the target service expects (e.g. {\"text\":\"hi\",\"output_path\":\"/tmp/x.opus\"} for openai:tts). Not a stringified JSON blob — pass the object directly. The server does auto-unwrap stringified JSON as a fallback, but the tool schema wants an object."},
+            payload:    {description: "The message. For mail to an agent, {\"text\":\"...\"} (its subject goes in `subject`). For a service, a JSON OBJECT with the fields it expects (e.g. {\"text\":\"hi\",\"output_path\":\"/tmp/x.opus\"} for openai:tts). Not a stringified JSON blob — pass the object directly. The server does auto-unwrap stringified JSON as a fallback, but the tool schema wants an object."},
             ordering:   {type: "string", enum: ["auto", "sync", "async"], description: "Message ordering: auto (default, resolved by target kind), sync (block for reply), or async (fire and forget)"},
             timeout_ms: {type: "integer", description: "Timeout in milliseconds for sync ordering (default: 30000)"},
             re:         {type: "string", description: "What this message answers: a message's id (the `Id:` of its inbox file), or a topic's post as `#topic:<seq>`. Carried with the message as its `Re:`."},
@@ -171,6 +171,11 @@ module Arcana
       },
     ]
 
+    # Each tool's argument names, from its schema.
+    TOOL_ARGS = JSON.parse(TOOLS.to_json).as_a.to_h do |tool|
+      {tool["name"].as_s, tool["inputSchema"]["properties"].as_h.keys}
+    end
+
     # This project's identity, from `.ai/config.yml` in the nearest
     # directory with `.ai/` at or above where the agent started the bridge
     # (see `AgentConfig.find`). Lets the bridge
@@ -267,6 +272,10 @@ module Arcana
     end
 
     private def call_tool(name : String, args : JSON::Any) : String
+      if (known = TOOL_ARGS[name]?) && (given = args.as_h?)
+        unknown = given.keys - known
+        return unknown_args(name, unknown, known) unless unknown.empty?
+      end
       case name
       when "arcana_directory"
         call_directory(args)
@@ -295,6 +304,22 @@ module Arcana
       %({"error":"#{ex.message}"})
     end
 
+    # Arguments a tool doesn't take are refused, not dropped: an agent
+    # that passed its message as `message` would otherwise send nothing
+    # and be told it went.
+    private def unknown_args(name : String, unknown : Array(String), known : Array(String)) : String
+      sends = {"arcana_deliver", "arcana_publish"}.includes?(name)
+      error = String.build do |e|
+        e << name << " takes no " << (unknown.size == 1 ? "argument " : "arguments ")
+        e << unknown.map { |a| "`#{a}`" }.join(", ") << "; it takes " << known.join(", ") << "."
+        e << %( The message goes in `payload` (for mail, {"text": "..."}), and its subject in `subject`.) if sends
+        e << (sends ? " Nothing was sent." : " Nothing was done.")
+      end
+      {error: error}.to_json
+    end
+
+    NOTHING_TO_SEND = {error: %(Nothing to send: the message goes in `payload` (for mail, {"text": "..."}), and its subject in `subject`. Nothing was sent.)}.to_json
+
     private def call_directory(args : JSON::Any) : String
       if address = args.str?("address")
         http_get("/directory/#{URI.encode_path_segment(address)}")
@@ -320,6 +345,7 @@ module Arcana
       return BAD_RE if re && !re.matches?(Envelope::REPLY_TO)
       # As the daemon will have it, so the copy filed below says the same.
       payload = Server.normalize_payload(args["payload"]?)
+      return NOTHING_TO_SEND if to.starts_with?('@') && subject.blank? && empty?(payload)
       time = Time.utc
       mail = outbound_mail(from, to, subject, payload, time)
       body = {
@@ -381,6 +407,18 @@ module Arcana
         end
       end
       h.to_json
+    end
+
+    # A payload with nothing in it: none, a blank string, or an empty
+    # object or array.
+    private def empty?(payload : JSON::Any) : Bool
+      case raw = payload.raw
+      when Nil    then true
+      when String then raw.blank?
+      when Hash   then raw.empty?
+      when Array  then raw.empty?
+      else             false
+      end
     end
 
     private def call_publish(args : JSON::Any) : String
