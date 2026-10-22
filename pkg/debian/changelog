@@ -1,3 +1,18 @@
+arcana (0.36.3-1) unstable; urgency=medium
+
+  * The bus refuses web pages. Any page open in a browser on the machine
+    could reach 127.0.0.1:19118: browsers let it open a WebSocket there,
+    or POST a text/plain body without asking first, so a page could join
+    as any address, call a service that spends money, or consume mail.
+    A request is now refused (403) when its `Origin` names a site that
+    isn't this machine, or its `Host` isn't a name for this machine
+    (DNS rebinding). Page scripts can set neither header; programs send
+    no `Origin`, so they pass. `ARCANA_ALLOWED_HOSTS` lists other names
+    for the machine. A server bound to 0.0.0.0 with none listed checks
+    only `Origin`.
+
+ -- trans <transfire@gmail.com>  Thu, 22 Oct 2026 04:37:00 +0000
+
 arcana (0.36.2-1) unstable; urgency=medium
 
   * The MCP bridge refuses an argument a tool doesn't take, naming it and
