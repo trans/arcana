@@ -46,6 +46,10 @@ module Arcana
     # store (ARCANA_DATABASE_URL).
     property auth_required : Bool = false
 
+    # Other names for this machine, besides localhost and its loopback
+    # addresses, that requests may use (see `LocalGuard`).
+    property allowed_hosts : Array(String) = [] of String
+
     def initialize(
       @bus : Bus,
       @directory : Directory,
@@ -57,6 +61,7 @@ module Arcana
     # Start the server. Blocks.
     def start
       server = HTTP::Server.new([
+        LocalGuard.new(@host, @allowed_hosts, @events),
         WebSocketHandler.new(@bus, @directory, auth_required: @auth_required, events: @events),
       ]) do |ctx|
         handle_rest(ctx)

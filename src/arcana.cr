@@ -5,6 +5,7 @@ require "arcana-ai"
 require "./arcana/actor"
 require "./arcana/chat_agent"
 require "./arcana/supervisor"
+require "./arcana/local_guard"
 require "./arcana/server"
 require "./arcana/snapshot"
 require "./arcana/help"
@@ -17,5 +18,5 @@ require "./arcana/db/migrate"
 require "./arcana/auth"
 
 module Arcana
-  VERSION = "0.36.2"
+  VERSION = "0.36.3"
 end

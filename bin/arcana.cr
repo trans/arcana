@@ -41,6 +41,9 @@ when "help", "--help", "-h"
   Environment:
     ARCANA_HOST       Server host (default: 127.0.0.1)
     ARCANA_PORT       Server port (default: 19118)
+    ARCANA_ALLOWED_HOSTS  Other names for this machine that requests may
+                      use, comma-separated (default: none; localhost and
+                      loopback addresses always pass)
     ARCANA_STATE_DIR  State directory (default: ~/.arcana)
   HELP
   exit 0
@@ -592,6 +595,7 @@ snapshot_file = File.join(state_dir, "state.json")
 state_backend = Arcana::LocalFileBackend.new(snapshot_file)
 server = Arcana::Server.new(bus, dir, host: host, port: port)
 server.events = events_backend
+server.allowed_hosts = (ENV["ARCANA_ALLOWED_HOSTS"]? || "").split(',').map(&.strip).reject(&.empty?)
 
 # Route every state-changing REST op (/register, /unregister) through
 # the same snapshot path used by graceful shutdown. This eliminates the
