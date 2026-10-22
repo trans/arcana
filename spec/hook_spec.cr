@@ -165,6 +165,43 @@ describe Arcana::AgentConfig do
     end
   end
 
+  it "makes the project's key once, private, and excluded from git" do
+    with_clean_env do
+      project(CONFIG) do |dir|
+        Process.run("git", ["init", "-q", dir])
+        cfg = Arcana::AgentConfig.load(dir)
+        cfg.key.should be_nil
+        key = cfg.key!
+        cfg.key_path.should eq(File.join(dir, ".ai", "arcana.key"))
+        cfg.key!.public_key.should eq(key.public_key)
+        cfg.key.not_nil!.public_key.should eq(key.public_key)
+        (File.info(cfg.key_path).permissions.value & 0o077).should eq(0)
+        File.read(File.join(dir, ".git", "info", "exclude")).should contain("**/.ai/arcana.key")
+
+        status = IO::Memory.new
+        Process.run("git", ["status", "--porcelain", "--untracked-files=all"], chdir: dir, output: status)
+        status.to_s.should_not contain("arcana.key")
+      end
+    end
+  end
+
+  it "excludes the key from the repository it's in, when .ai links into another one" do
+    with_clean_env do
+      project(CONFIG) do |dir|
+        main = File.join(dir, "group", "main")
+        Dir.mkdir_p(File.join(main, ".ai"))
+        Process.run("git", ["init", "-q", main])
+        File.symlink("main/.ai", File.join(dir, "group", ".ai"))
+        cfg = Arcana::AgentConfig.find(File.join(dir, "group"))
+        cfg.key!
+        File.read(File.join(main, ".git", "info", "exclude")).should contain("**/.ai/arcana.key")
+        status = IO::Memory.new
+        Process.run("git", ["status", "--porcelain", "--untracked-files=all"], chdir: main, output: status)
+        status.to_s.should_not contain("arcana.key")
+      end
+    end
+  end
+
   it "moves the XDG-state token into .ai/ when the project gains one" do
     with_clean_env do
       dir = File.tempname("arcana-later-ai")
@@ -216,9 +253,27 @@ describe Arcana::Hook do
           context.should contain("the session-start hook registered it")
           directory.lookup("@proj").not_nil!.description.should eq("The project's agent.")
 
+          # Held by the project's key, as well as its owner token.
+          directory.key_for("@proj").should eq(Arcana::AgentConfig.load(dir).key.not_nil!.public_key)
+
           # The next session finds it already theirs.
           _, stdout, _ = hook(14610, dir, "session-start", "--agent", "codex")
           JSON.parse(stdout)["hookSpecificOutput"]["additionalContext"].as_s.should contain("already registered under this project's owner token")
+        end
+      end
+    end
+  end
+
+  it "session-start moves a handle held under the owner token to the project's key" do
+    with_clean_env do
+      with_bus(14630) do |directory|
+        project(CONFIG) do |dir|
+          token = Arcana::AgentConfig.load(dir).owner_token!
+          directory.claim(Arcana::Directory::Listing.new(address: "@proj", name: "@proj", description: "",
+            kind: Arcana::Directory::Kind::Agent), token)
+          _, stdout, _ = hook(14630, dir, "session-start", "--agent", "claude")
+          JSON.parse(stdout)["hookSpecificOutput"]["additionalContext"].as_s.should contain("moved it to the project's key")
+          directory.key_for("@proj").should eq(Arcana::AgentConfig.load(dir).key.not_nil!.public_key)
         end
       end
     end

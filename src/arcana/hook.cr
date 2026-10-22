@@ -73,6 +73,15 @@ module Arcana
         return 0
       end
 
+      # Signed with the project's key, so the handle is held by it: the
+      # first time, the owner token shown moves the handle to the key.
+      key_warning = begin
+        bus.key = cfg.key!
+        nil
+      rescue ex
+        "Arcana: this project's key can't be read (#{ex.message}), so the session-start hook registered without it."
+      end
+      warning = [warning, key_warning].compact.join("\n").presence
       status, body = bus.post("/register", {
         address:     cfg.handle,
         kind:        "agent",
@@ -97,6 +106,7 @@ module Arcana
       how = case body["status"]?.try(&.as_s?)
             when "yours"   then "it was already registered under this project's owner token, so the session-start hook refreshed it"
             when "claimed" then "it was registered without an owner token, so the session-start hook claimed it for this project"
+            when "moved"   then "it was registered under this project's owner token, and the session-start hook has now moved it to the project's key"
             else                "the session-start hook registered it for this project"
             end
       lines = [
@@ -171,6 +181,7 @@ module Arcana
       return 0 if payload["reason"]?.try(&.as_s?) == "clear"
 
       cfg = AgentConfig.load(project_dir)
+      bus.key = (cfg.key rescue nil)
       drain(bus, cfg) if cfg.ai_dir?
       bus.post("/presence", {address: cfg.handle, owner_token: cfg.owner_token, online: false})
       File.delete(mail_flag(cfg.handle)) if File.exists?(mail_flag(cfg.handle))
@@ -325,6 +336,9 @@ module Arcana
     # The few REST calls the hooks make, with short timeouts: a hook that
     # hangs holds up the agent.
     class Rest
+      # The project's key, which signs each request once set.
+      property key : Key?
+
       def initialize(@base_url : String)
       end
 
@@ -334,7 +348,12 @@ module Arcana
         client = HTTP::Client.new(uri)
         client.connect_timeout = 1.second
         client.read_timeout = 2.seconds
-        resp = client.post(path, headers: HTTP::Headers{"Content-Type" => "application/json"}, body: body.to_json)
+        json = body.to_json
+        headers = HTTP::Headers{"Content-Type" => "application/json"}
+        if key = @key
+          headers.merge!(Signing.sign_request(key, "POST", "#{uri.host}:#{uri.port || 80}", path, json))
+        end
+        resp = client.post(path, headers: headers, body: json)
         {resp.status_code, (JSON.parse(resp.body) rescue nil)}
       rescue IO::Error | Socket::Error
         {nil, nil}

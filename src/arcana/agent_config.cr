@@ -23,11 +23,17 @@ module Arcana
   # kept out of git through the repository's `info/exclude` since it only
   # means something to this machine's bus. A project without `.ai/` keeps
   # it under `$XDG_STATE_HOME/arcana/tokens/` instead.
+  #
+  # The project's key (see `Arcana::Key`) proves the same, without the
+  # bus ever holding the secret: `.ai/arcana.key`, kept out of git the
+  # same way, or `$XDG_STATE_HOME/arcana/keys/` without `.ai/`. One key
+  # holds all the project's addresses.
   struct AgentConfig
     class Error < Arcana::Error; end
 
     CONFIG_FILES = {"config.yml", "config.yaml"}
     TOKEN_FILE   = "arcana.token"
+    KEY_FILE     = "arcana.key"
 
     getter project_dir : String
     getter handle : String
@@ -133,8 +139,32 @@ module Arcana
     end
 
     private def state_token_path : String
+      state_path("tokens")
+    end
+
+    private def state_path(kind : String) : String
       state = ENV["XDG_STATE_HOME"]?.try(&.presence) || File.join(Path.home.to_s, ".local", "state")
-      File.join(state, "arcana", "tokens", @handle.lchop('@'))
+      File.join(state, "arcana", kind, @handle.lchop('@'))
+    end
+
+    def key_path : String
+      ai_dir? ? File.join(@project_dir, ".ai", KEY_FILE) : state_path("keys")
+    end
+
+    # The project's key, or nil if none has been made yet.
+    def key : Key?
+      path = key_path
+      Key.load(path) if File.exists?(path)
+    end
+
+    # The project's key, made on first use.
+    def key! : Key
+      path = key_path
+      return Key.load(path) if File.exists?(path)
+      Dir.mkdir_p(File.dirname(path))
+      key = Key.load_or_create(path)
+      exclude_from_git(KEY_FILE, "Arcana key (private, machine-local, see arcana hook)") if ai_dir?
+      key
     end
 
     # The owner token, or nil if none has been made yet.
@@ -153,7 +183,7 @@ module Arcana
       return nil unless File.exists?(old)
       token = File.read(old).strip.presence || return nil
       File.write(token_path, "#{token}\n", perm: 0o600)
-      exclude_from_git
+      exclude_from_git(TOKEN_FILE)
       File.delete(old)
       token
     end
@@ -167,22 +197,25 @@ module Arcana
       Dir.mkdir_p(File.dirname(path))
       token = Random::Secure.hex(16)
       File.write(path, "#{token}\n", perm: 0o600)
-      exclude_from_git if ai_dir?
+      exclude_from_git(TOKEN_FILE) if ai_dir?
       token
     end
 
-    # List the token in the repository's `info/exclude`, which keeps it
-    # out of commits without touching any tracked file.
-    private def exclude_from_git : Nil
+    # List `file` (in `.ai/`) in the repository's `info/exclude`, which
+    # keeps it out of commits without touching any tracked file. The
+    # repository is the one the file is in: when `.ai` is a link to
+    # another project's, that project's.
+    private def exclude_from_git(file : String, comment : String = "Arcana owner token (machine-local, see arcana hook)") : Nil
+      ai = File.realpath(File.join(@project_dir, ".ai"))
       buffer = IO::Memory.new
       status = Process.run("git", ["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"],
-        chdir: @project_dir, output: buffer, error: Process::Redirect::Close)
+        chdir: ai, output: buffer, error: Process::Redirect::Close)
       return unless status.success?
       exclude = buffer.to_s.strip
-      pattern = "**/.ai/#{TOKEN_FILE}"
+      pattern = "**/.ai/#{file}"
       return if File.exists?(exclude) && File.read_lines(exclude).includes?(pattern)
       Dir.mkdir_p(File.dirname(exclude))
-      File.open(exclude, "a") { |f| f.puts "# Arcana owner token (machine-local, see arcana hook)\n#{pattern}" }
+      File.open(exclude, "a") { |f| f.puts "# #{comment}\n#{pattern}" }
     rescue
       # No git, or not a repository: nothing to keep it out of.
     end

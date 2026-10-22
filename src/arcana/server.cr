@@ -90,13 +90,77 @@ module Arcana
       raise "sender '#{from}' is not registered" unless @bus.has_mailbox?(from)
     end
 
+    # Has the sender proved `address` is its own, showing the key or the
+    # owner token the address is held by? An address held by neither
+    # proves nothing.
+    def self.proves?(directory : Directory, address : String, key : String?, token : String?) : Bool
+      return false if address.empty? || (key.nil? && token.nil?) || !directory.held?(address)
+      directory.check_holder!(address, owner_token: token, key: key)
+      true
+    rescue Directory::HeldError
+      false
+    end
+
+    # Where a signed request's key goes once its signature checks. One a
+    # client sends is dropped first.
+    PROVEN_KEY = "Arcana-Proven-Key"
+
+    @nonces = Signing::Nonces.new
+
+    # Check a signed request (see `Signing`): a request signed wrongly,
+    # out of time or with a nonce already used is refused (401), since
+    # that is a broken client or a replay. An unsigned one passes, as
+    # before keys.
+    private def check_signature!(ctx : HTTP::Server::Context) : Bool
+      request = ctx.request
+      request.headers.delete(PROVEN_KEY)
+      return true unless request.headers[Signing::SIGNATURE_HEADER]?
+      body = request.body.try(&.gets_to_end) || ""
+      request.body = body
+      signed = Signing.signed_request(request.headers, request.method, request.headers["Host"]? || "", request.resource, body).not_nil!
+      raise Arcana::Error.new("the request's nonce was used before") unless @nonces.fresh?(signed.nonce)
+      request.headers[PROVEN_KEY] = signed.key
+      true
+    rescue ex : Arcana::Error
+      @events.try &.record(Events::Event.new(
+        type: "auth.failed",
+        subject: ctx.request.path,
+        metadata: {
+          "reason" => JSON::Any.new(ex.message || "bad signature"),
+          "key"    => JSON::Any.new(ctx.request.headers[Signing::KEY_HEADER]? || ""),
+        } of String => JSON::Any,
+      ))
+      ctx.response.status = HTTP::Status::UNAUTHORIZED
+      ctx.response.content_type = "application/json"
+      ctx.response.print({error: "#{ex.message}: nothing was done"}.to_json)
+      false
+    end
+
+    # The key a request was signed with, once checked.
+    private def proven_key(ctx : HTTP::Server::Context) : String?
+      ctx.request.headers[PROVEN_KEY]?
+    end
+
+    # Reading an address a key holds without that key's signature is
+    # logged, not yet refused: once the log shows no reader still does,
+    # reading will need the key.
+    private def note_read(ctx : HTTP::Server::Context, address : String) : Nil
+      key = @directory.key_for(address)
+      return unless key && proven_key(ctx) != key
+      @events.try &.record(Events::Event.new(
+        type: "read.unproven",
+        subject: address,
+        metadata: {"path" => JSON::Any.new(ctx.request.path)} of String => JSON::Any,
+      ))
+    end
+
     private def save_state
       @state_saver.try &.call
     end
 
     private def check_token!(address : String, parsed : JSON::Any)
       expected = @tokens[address]?
-      return unless expected  # no token set = no auth required
+      return unless expected # no token set = no auth required
       given = parsed.str("token")
       unless given == expected
         @events.try &.record(Events::Event.new(
@@ -152,13 +216,13 @@ module Arcana
 
     private def handle_rest(ctx : HTTP::Server::Context)
       return unless enforce_rest_auth!(ctx)
+      return unless check_signature!(ctx)
       ctx.response.content_type = "application/json"
       path = ctx.request.path
 
       case {ctx.request.method, path}
       when {"GET", "/health"}
         ctx.response.print %({"status":"ok","addresses":#{@bus.addresses.size},"listings":#{@directory.list.size}})
-
       when {"GET", "/directory"}
         if query = ctx.request.query_params["q"]?
           ctx.response.print @directory.to_json(@directory.search(query))
@@ -170,10 +234,8 @@ module Arcana
         else
           ctx.response.print @directory.to_json
         end
-
       when {"GET", "/events"}
         handle_get_events(ctx)
-
       when {"GET", _}
         if path.starts_with?("/directory/")
           # Decoded, since a topic's `#` must be sent as `%23`.
@@ -188,64 +250,44 @@ module Arcana
           ctx.response.status = HTTP::Status::NOT_FOUND
           ctx.response.print %({"error":"not found"})
         end
-
       when {"POST", "/register"}
         handle_post_register(ctx)
-
       when {"POST", "/unregister"}
         handle_post_unregister(ctx)
-
       when {"POST", "/receive"}
         handle_post_receive(ctx)
-
       when {"POST", "/send"}
         handle_post_send(ctx)
-
       when {"POST", "/request"}
         handle_post_request(ctx)
-
       when {"POST", "/deliver"}
         handle_post_deliver(ctx)
-
       when {"POST", "/publish"}
         handle_post_publish(ctx)
-
       when {"POST", "/subscribe"}
         handle_post_subscribe(ctx, subscribe: true)
-
       when {"POST", "/unsubscribe"}
         handle_post_subscribe(ctx, subscribe: false)
-
       when {"POST", "/subscriptions"}
         handle_post_subscriptions(ctx)
-
       when {"POST", "/inbox"}
         handle_post_inbox(ctx)
-
       when {"POST", "/outstanding"}
         handle_post_outstanding(ctx)
-
       when {"POST", "/await"}
         handle_post_await(ctx)
-
       when {"POST", "/freeze"}
         handle_post_freeze(ctx)
-
       when {"POST", "/thaw"}
         handle_post_thaw(ctx)
-
       when {"POST", "/frozen"}
         handle_post_frozen(ctx)
-
       when {"POST", "/busy"}
         handle_post_busy(ctx)
-
       when {"POST", "/presence"}
         handle_post_presence(ctx)
-
       when {"POST", "/peek"}
         handle_post_peek(ctx)
-
       else
         ctx.response.status = HTTP::Status::NOT_FOUND
         ctx.response.print %({"error":"not found"})
@@ -291,7 +333,7 @@ module Arcana
           guide: parsed.str?("guide"),
           tags: parsed.str_arr("tags"),
           retention: retention,
-        ), parsed.str?("owner_token"))
+        ), parsed.str?("owner_token"), key: proven_key(ctx))
       end
 
       if topic
@@ -330,7 +372,7 @@ module Arcana
       raise "address required" if address.empty?
       online = parsed.bool?("online")
       raise "online (true or false) required" if online.nil?
-      @directory.check_owner!(address, parsed.str?("owner_token"))
+      @directory.check_holder!(address, owner_token: parsed.str?("owner_token"), key: proven_key(ctx))
       @directory.set_online(address, online)
       save_state
       ctx.response.print({ok: true, address: address, online: online}.to_json)
@@ -366,7 +408,7 @@ module Arcana
       raise "address required" if address.empty?
 
       check_token!(address, parsed)
-      @directory.check_owner!(address, parsed.str?("owner_token"))
+      @directory.check_holder!(address, owner_token: parsed.str?("owner_token"), key: proven_key(ctx))
 
       @directory.unregister(address)
       if Directory.topic?(address)
@@ -392,6 +434,7 @@ module Arcana
       return read_topic(ctx, address, parsed) if Directory.topic?(address)
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
+      note_read(ctx, resolved)
 
       mb = @bus.mailbox(resolved)
       ctx.response.print mb.inbox.to_json
@@ -409,6 +452,7 @@ module Arcana
       end
       resolved = resolve_addr(address)
       check_token!(resolved, parsed)
+      note_read(ctx, resolved)
 
       mb = @bus.mailbox(resolved)
 
@@ -455,7 +499,7 @@ module Arcana
 
     private def handle_post_send(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      envelope = envelope_from_json(parsed)
+      envelope = envelope_from_json(parsed, ctx)
       check_sender!(envelope.from)
       if @bus.send?(envelope)
         ctx.response.print %({"ok":true})
@@ -472,7 +516,7 @@ module Arcana
       failed_addr = ""
       begin
         parsed = JSON.parse(ctx.request.body.not_nil!)
-        envelope = envelope_from_json(parsed)
+        envelope = envelope_from_json(parsed, ctx)
         failed_addr = envelope.to
         check_sender!(envelope.from)
         timeout_ms = parsed.int("timeout_ms", 30_000)
@@ -589,7 +633,7 @@ module Arcana
 
     private def handle_post_request(ctx : HTTP::Server::Context)
       parsed = JSON.parse(ctx.request.body.not_nil!)
-      envelope = envelope_from_json(parsed)
+      envelope = envelope_from_json(parsed, ctx)
       timeout_ms = parsed.int("timeout_ms", 30_000)
       timeout = timeout_ms.milliseconds
 
@@ -740,7 +784,7 @@ module Arcana
         parsed = JSON.parse(ctx.request.body.not_nil!)
         topic = parsed.str("topic")
         raise "topic required" if topic.empty?
-        envelope = envelope_from_json(parsed)
+        envelope = envelope_from_json(parsed, ctx)
         check_sender!(envelope.from)
         if seq = @bus.publish(topic, envelope)
           ctx.response.print({ok: true, topic: topic, seq: seq, correlation_id: envelope.correlation_id, subscribers: @bus.subscribers(topic).size}.to_json)
@@ -782,6 +826,17 @@ module Arcana
                   j.field "correlation_id", env.correlation_id
                   j.field "reply_to", env.reply_to if env.reply_to
                   j.field "timestamp", env.timestamp.to_rfc3339
+                  j.field "id", env.id if env.id
+                  j.field "re", env.re if env.re
+                  if sig = env.signature
+                    j.field "signature" do
+                      j.object do
+                        j.field "key", sig.key
+                        j.field "sig", sig.sig
+                      end
+                    end
+                  end
+                  j.field "verified", true if env.verified
                 end
               end
             end
@@ -800,7 +855,7 @@ module Arcana
       raise "topic required" if topic.empty?
       raise "address required" if address.empty?
       check_token!(address, parsed)
-      @directory.check_owner!(address, parsed.str?("owner_token"))
+      @directory.check_holder!(address, owner_token: parsed.str?("owner_token"), key: proven_key(ctx))
       if subscribe
         @bus.subscribe(topic, address, parsed.str?("cadence") || "always")
       else
@@ -858,24 +913,39 @@ module Arcana
       ctx.response.print %({"error":"#{ex.message}"})
     end
 
-    private def envelope_from_json(parsed : JSON::Any) : Envelope
+    # The envelope a REST request carries, stamped `verified` when the
+    # request's signature shows the key holding `from`. A signed
+    # envelope's payload is left as it is, since unwrapping it would
+    # void the signature.
+    private def envelope_from_json(parsed : JSON::Any, ctx : HTTP::Server::Context) : Envelope
       env = parsed["envelope"]? || parsed
       ordering = case env.str?("ordering")
                  when "sync"  then Ordering::Sync
                  when "async" then Ordering::Async
                  else              Ordering::Auto
                  end
-      Envelope.new(
+      signature = Envelope.signature_of(env["signature"]?)
+      envelope = Envelope.new(
         from: env.str("from"),
         to: env.str("to"),
         subject: env.str("subject"),
-        payload: Server.normalize_payload(env["payload"]?),
+        payload: signature ? (env["payload"]? || JSON::Any.new(nil)) : Server.normalize_payload(env["payload"]?),
         correlation_id: env.str?("correlation_id") || Random::Secure.hex(8),
         reply_to: env.str?("reply_to"),
         ordering: ordering,
+        timestamp: Server.timestamp_of(env),
         id: env.str?("id"),
         re: env.str?("re"),
+        signature: signature,
       )
+      envelope.verified = Server.proves?(@directory, envelope.from, proven_key(ctx), nil)
+      envelope
+    end
+
+    # The time an envelope was written with, or now when it has none
+    # that reads.
+    def self.timestamp_of(env : JSON::Any) : Time
+      env.str?("timestamp").try { |t| Time.parse_rfc3339(t) rescue nil } || Time.utc
     end
 
     # Some MCP clients (and hand-rolled HTTP callers) stringify the payload
@@ -942,8 +1012,9 @@ module Arcana
             return
           end
 
+          bus_host = context.request.headers["Host"]? || ""
           ws = HTTP::WebSocketHandler.new do |socket|
-            handle_connection(socket)
+            handle_connection(socket, bus_host)
           end
           ws.call(context)
         else
@@ -965,9 +1036,35 @@ module Arcana
         ctx.request.headers["Upgrade"]?.try(&.downcase) == "websocket"
       end
 
-      private def handle_connection(ws : HTTP::WebSocket)
+      # A join that offered a key, waiting for the client to sign the
+      # challenge it was sent.
+      private record PendingJoin, address : String, key : String, challenge : String,
+        listing : Directory::Listing, listed : Bool, owner_token : String?
+
+      # `bus_host` is the `Host` the client asked for, which its join
+      # proof must name (see `Signing.join_proof`).
+      private def handle_connection(ws : HTTP::WebSocket, bus_host : String)
         address : String? = nil
         forwarder : Fiber? = nil
+        pending : PendingJoin? = nil
+        # What the connection proved at join, so its messages from an
+        # address held by that key or token are stamped `verified`.
+        proven_key : String? = nil
+        proven_token : String? = nil
+
+        attach = ->(raw : String) do
+          mailbox = @bus.mailbox(raw)
+          address = raw
+          @mutex.synchronize { @connections[raw] = ws }
+          # Forward bus messages to WebSocket
+          forwarder = spawn do
+            loop do
+              envelope = mailbox.receive
+              ws.send(envelope.to_json)
+            end
+          end
+          nil
+        end
 
         ws.on_message do |msg|
           begin
@@ -1000,61 +1097,84 @@ module Arcana
                 schema: parsed["schema"]?,
                 tags: parsed.str_arr("tags"),
               )
+              owner_token = parsed.str?("owner_token").try(&.presence)
+
+              # A join offering a key is attached only once the client
+              # signs the challenge sent back ("prove" below).
+              if key = parsed.str?("key").try(&.presence)
+                raise "not a public key: #{key}" unless Key.valid_public_key?(key)
+                challenge = Signing.challenge
+                pending = PendingJoin.new(raw, key, challenge, listing, listed, owner_token)
+                ws.send({type: "challenge", challenge: challenge}.to_json)
+                next
+              end
 
               # With an owner token, the join claims the address as
               # POST /register does, and a join showing another token is
               # refused (HeldError). Without one, an address held under a
-              # token is still joined for now, but the event log records
-              # it, so the clients that would break are known before
-              # joins need the token.
-              if owner_token = parsed.str?("owner_token").try(&.presence)
+              # token or a key is still joined for now, but the event log
+              # records it, so the clients that would break are known
+              # before joins need proof.
+              if owner_token
                 if listed
                   @directory.claim(listing, owner_token)
                   save_state
                 else
                   @directory.check_owner!(raw, owner_token)
                 end
+                proven_token = owner_token
               elsif @directory.held?(raw)
                 @events.try &.record(Events::Event.new(
                   type: "join.unproven",
                   subject: raw,
-                  metadata: {"reason" => JSON::Any.new("joined without the owner token the address is held under")} of String => JSON::Any,
+                  metadata: {"reason" => JSON::Any.new("joined without the owner token or key the address is held by")} of String => JSON::Any,
                 ))
               elsif listed && !@directory.lookup(raw)
                 # Register in directory unless already present (allows reconnection
                 # after restart when state was loaded from disk).
                 @directory.register(listing)
               end
-
-              # Create mailbox on local bus
-              mailbox = @bus.mailbox(raw)
-              address = raw
-
-              @mutex.synchronize { @connections[raw] = ws }
-
-              # Forward bus messages to WebSocket
-              forwarder = spawn do
-                loop do
-                  envelope = mailbox.receive
-                  ws.send(envelope.to_json)
-                end
+              attach.call(raw)
+            when "prove"
+              join = pending
+              raise "nothing to prove: join with your key first" unless join
+              pending = nil
+              signature = parsed.str("signature")
+              unless Key.verify(join.key, signature, Signing.join_proof(bus_host, join.address, join.challenge))
+                @events.try &.record(Events::Event.new(
+                  type: "auth.failed",
+                  subject: join.address,
+                  metadata: {
+                    "reason" => JSON::Any.new("the join's signature doesn't match its key"),
+                    "key"    => JSON::Any.new(join.key),
+                  } of String => JSON::Any,
+                ))
+                raise "the join's signature doesn't match its key (signed for bus #{bus_host}?)"
               end
-
+              if join.listed
+                @directory.claim(join.listing, join.owner_token, key: join.key)
+                save_state
+              else
+                @directory.check_holder!(join.address, owner_token: join.owner_token, key: join.key)
+              end
+              proven_key = join.key
+              proven_token = join.owner_token
+              attach.call(join.address)
+              ws.send({type: "joined", address: join.address, verified: true}.to_json)
             when "send"
               envelope = parse_envelope(parsed)
+              envelope.verified = Server.proves?(@directory, envelope.from, proven_key, proven_token)
               @bus.send?(envelope)
-
             when "publish"
               topic = parsed.str("topic")
               envelope = parse_envelope(parsed)
+              envelope.verified = Server.proves?(@directory, envelope.from, proven_key, proven_token)
               @bus.publish(topic, envelope)
-
             when "subscribe"
               topic = parsed.str("topic")
               if (addr = address) && !addr.empty? && !topic.empty?
                 @bus.subscribe(topic, addr)
               end
-
             when "unsubscribe"
               topic = parsed.str("topic")
               if (addr = address) && !addr.empty? && !topic.empty?
@@ -1062,7 +1182,7 @@ module Arcana
               end
             end
           rescue ex
-            ws.send(%({"error":"#{ex.message}"}))
+            ws.send({error: ex.message}.to_json)
           end
         end
 
@@ -1091,8 +1211,10 @@ module Arcana
           payload: env["payload"]? || JSON::Any.new(nil),
           correlation_id: env.str?("correlation_id") || Random::Secure.hex(8),
           reply_to: env.str?("reply_to"),
+          timestamp: Server.timestamp_of(env),
           id: env.str?("id"),
           re: env.str?("re"),
+          signature: Envelope.signature_of(env["signature"]?),
         )
       end
     end

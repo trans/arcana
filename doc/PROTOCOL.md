@@ -48,6 +48,10 @@ The message data structure:
   via the target's Directory kind — services get sync (block for
   reply), agents get async (fire and forget). Callers can force
   either explicitly.
+- **`id`** and **`re`** are dot-ai mail headers: the message's own id,
+  and what it answers.
+- **`signature`** is the sender's, `{"key": ..., "sig": ...}`, and
+  **`verified`** the bus's stamp; see "Proving who sends" below.
 
 ## Protocol (payload convention)
 
@@ -135,7 +139,8 @@ default.
 Persistent bidirectional connection to `/bus`. `Arcana::Client` uses
 this. Frames are JSON.
 
-**Join frame** (first frame after connect):
+**Join frame** (first frame after connect; `owner_token` and `key`
+are optional, see "Proving who sends"):
 
 ```json
 {
@@ -191,6 +196,87 @@ process. The bridge translates tool calls into REST calls to the
 daemon. Tools: `arcana_directory`, `arcana_deliver`, `arcana_publish`,
 `arcana_register`, `arcana_inbox`, `arcana_receive`, `arcana_expect`,
 `arcana_freeze`, `arcana_health`, `arcana_events`.
+
+## Proving who sends
+
+A project proves its addresses are its own with an Ed25519 key pair.
+The bus holds only public keys. Since arcana 0.37 the bus checks what
+it is shown and stamps messages; it doesn't yet refuse what isn't
+proved (see the end of this section).
+
+**Keys.** The private key is PKCS#8 PEM, as `openssl genpkey
+-algorithm ed25519` writes it, in the project's `.ai/arcana.key` (mode
+0600, kept out of git); the session-start hook makes it. A public key
+is written `ed25519:` and its 32 raw bytes in base64. A signature is
+its 64 raw bytes in base64. One key holds all of a project's addresses.
+
+**What is signed** is always a JSON object in RFC 8785 canonical form
+(no whitespace, keys sorted, numbers as JavaScript writes them), tagged
+with `v`, so a signature for one purpose can't pass for another.
+
+**Joining over the WebSocket.** A join frame with `"key"` gets back a
+challenge; the client signs it, and the bus answers `joined`:
+
+```json
+{"type": "join", "address": "mj:voice", "key": "ed25519:...", ...}
+{"type": "challenge", "challenge": "<32 random bytes, base64>"}
+{"type": "prove", "signature": "<base64>"}
+{"type": "joined", "address": "mj:voice", "verified": true}
+```
+
+The client signs `{"v":"arcana-join-1","bus":B,"address":A,"challenge":C}`,
+where `B` is the `Host` header it connected with (`host:port`), so a
+proof made for one bus can't be passed to another. Messages the
+connection then sends from an address its key holds are stamped
+`verified`. A wrong proof is answered `{"error": ...}` and the join
+doesn't happen. A join that shows the address's `owner_token` instead
+counts as proof too.
+
+**REST.** A signed request carries four headers:
+
+```
+Arcana-Key:       ed25519:...
+Arcana-Time:      1793000000        (Unix seconds)
+Arcana-Nonce:     <random, e.g. 32 hex digits>
+Arcana-Signature: <base64>
+```
+
+signing `{"v":"arcana-request-1","method":M,"bus":Host,"path":P,"time":T,"nonce":N,"body":H}`:
+the method in capitals, the `Host` header, the path with any query,
+the time and nonce as in the headers (`time` a number), and the body's
+SHA-256 in hex. The bus refuses (401) a time more than 60 s from its
+clock, a nonce it has seen, or a signature that doesn't match. A signed
+`POST /register` claims the address for the key; `/presence`,
+`/unregister` and `/subscribe` accept the key in place of the owner
+token.
+
+**Envelopes.** The sender signs
+`{"v":"arcana-envelope-1","from","to","subject","payload","correlation_id","time","id","re"}`,
+with `time` the envelope's `timestamp` in whole Unix seconds and
+`null` for an absent `id` or `re`, and sends it as `"signature":
+{"key": ..., "sig": ...}`. The bus passes it on unchanged, so the
+receiver can check it without trusting the bus: the signature must
+match, and `key` must be the one the directory lists for `from` (each
+listing held by a key shows it as `"key"`). A topic post's `to` is the
+topic. `reply_to` and `ordering` aren't signed: the bus sets the one
+and resolves the other.
+
+**Holding addresses.** The first key to claim a free address holds it.
+An address held under an owner token moves to a key when the claim
+shows the token too (`status: "moved"`), once; until owner tokens
+retire, the token still works for it. Another key, or a token alone
+for an address only a key holds, gets 409 `held`.
+
+**`verified`** is the bus's own stamp, true when the sender proved
+`from` is its own: by signing with the key holding it, or by the owner
+token shown at join. Whatever a client writes there is dropped.
+
+**Not yet enforced.** A join without proof to an address held by a key
+or token still goes through, logged as `join.unproven`; reading a
+mailbox a key holds without its signature is logged as
+`read.unproven`; and each `message.sent` event records `verified`.
+Once the log shows every client proving itself, the bus will refuse
+the rest.
 
 ## Full round-trip: MCP `arcana_deliver` to a remote Toolset
 

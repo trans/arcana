@@ -36,6 +36,7 @@ module Arcana
       ephemeral_addrs = Set(String).new
       directory.list.each { |l| ephemeral_addrs << l.address if l.ephemeral }
       owner_tokens = directory.owner_tokens
+      keys = directory.keys
 
       JSON.build do |j|
         j.object do
@@ -60,6 +61,9 @@ module Arcana
                   if owner = owner_tokens[l.address]?
                     j.field "owner_token", owner
                   end
+                  if key = keys[l.address]?
+                    j.field "key", key
+                  end
                   j.field "online", false unless directory.online?(l.address)
                 end
               end
@@ -68,7 +72,7 @@ module Arcana
           j.field "mailboxes" do
             j.array do
               bus.addresses.each do |addr|
-                next if addr.starts_with?("_reply:") # skip transient reply mailboxes
+                next if addr.starts_with?("_reply:")    # skip transient reply mailboxes
                 next if ephemeral_addrs.includes?(addr) # skip code-owned mailboxes
                 mb = bus.mailbox(addr)
                 snap = mb.dump
@@ -195,6 +199,9 @@ module Arcana
             end
             if owner = entry.str?("owner_token")
               directory.set_owner_token(address, owner) unless owner.empty?
+            end
+            if key = entry.str?("key")
+              directory.set_key(address, key) if Key.valid_public_key?(key)
             end
             directory.set_online(address, false) if entry["online"]?.try(&.as_bool?) == false
           rescue ex : Arcana::Error

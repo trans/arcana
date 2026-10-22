@@ -182,12 +182,15 @@ module Arcana
     # default `from` to the agent's handle and supply its owner token.
     getter self_config : AgentConfig?
 
+    @key : Key?
+
     def initialize(@base_url : String = "http://127.0.0.1:19118", @api_key : String? = nil,
                    project_dir : String? = ENV["CLAUDE_PROJECT_DIR"]?.try(&.presence) || Dir.current)
       @self_config = project_dir.try { |d| AgentConfig.find(d) rescue nil }
       uri = URI.parse(@base_url)
-      @http = HTTP::Client.new(uri)  # persistent keep-alive connection
-      @http_mutex = Mutex.new         # HTTP::Client is not fiber-safe for concurrent use
+      @bus_host = "#{uri.host}:#{uri.port || (uri.scheme == "https" ? 443 : 80)}"
+      @http = HTTP::Client.new(uri) # persistent keep-alive connection
+      @http_mutex = Mutex.new       # HTTP::Client is not fiber-safe for concurrent use
     end
 
     # Run the MCP stdio loop. Blocks.
@@ -227,13 +230,11 @@ module Arcana
           serverInfo:   {name: "arcana", version: Arcana::VERSION},
           instructions: Help::BRIEFING,
         })
-
       when "notifications/initialized"
         nil # no response needed
 
       when "tools/list"
         jsonrpc_result(id, {tools: TOOLS})
-
       when "tools/call"
         tool_name = params.str("name")
         args = params["arguments"]? || JSON::Any.new({} of String => JSON::Any)
@@ -241,27 +242,21 @@ module Arcana
         jsonrpc_result(id, {
           content: [{type: "text", text: result}],
         })
-
       when "resources/list"
         jsonrpc_result(id, {resources: resource_list})
-
       when "resources/read"
         uri = params.str("uri")
         jsonrpc_result(id, read_resource(uri))
-
       when "resources/subscribe"
         uri = params.str("uri")
         handle_subscribe(uri)
         jsonrpc_result(id, {} of String => String)
-
       when "resources/unsubscribe"
         uri = params.str("uri")
         handle_unsubscribe(uri)
         jsonrpc_result(id, {} of String => String)
-
       when "ping"
         jsonrpc_result(id, {} of String => String)
-
       else
         if id
           jsonrpc_error(id, -32601, "Method not found: #{method}")
@@ -348,7 +343,9 @@ module Arcana
       return NOTHING_TO_SEND if to.starts_with?('@') && subject.blank? && empty?(payload)
       time = Time.utc
       mail = outbound_mail(from, to, subject, payload, time)
-      body = {
+      envelope = Envelope.new(from: from, to: to, subject: subject, payload: payload,
+        timestamp: time, id: mail.try(&.[:id]), re: re)
+      body = with_signature(JSON.parse({
         from:       from,
         to:         to,
         subject:    subject,
@@ -357,8 +354,8 @@ module Arcana
         timeout_ms: args.int("timeout_ms", 30_000),
         id:         mail.try(&.[:id]),
         re:         re,
-      }.to_json
-      resp = request { @http.post("/deliver", headers: json_headers, body: body) }
+      }.to_json).as_h, envelope)
+      resp = request { @http.post("/deliver", headers: json_headers("/deliver", body), body: body) }
       return resp.body unless resp.success?
       return resp.body unless mail
       file_sent(mail, re, time, resp.body)
@@ -424,14 +421,46 @@ module Arcana
     private def call_publish(args : JSON::Any) : String
       re = args.str?("re").try(&.strip.presence)
       return BAD_RE if re && !re.matches?(Envelope::REPLY_TO)
-      body = {
-        from:    args.str("from", default_from),
-        topic:   args.str("topic"),
-        subject: args.str("subject"),
-        payload: args["payload"]? || JSON::Any.new(nil),
+      from = args.str("from", default_from)
+      topic = args.str("topic")
+      subject = args.str("subject")
+      # As the daemon would have it; a signed payload is left as it is.
+      payload = Server.normalize_payload(args["payload"]?)
+      # A post is stored with the topic as its `to`, which a signature covers.
+      envelope = Envelope.new(from: from, to: topic, subject: subject, payload: payload, re: re)
+      body = with_signature(JSON.parse({
+        from:    from,
+        to:      topic,
+        topic:   topic,
+        subject: subject,
+        payload: payload,
         re:      re,
-      }.to_json
+      }.to_json).as_h, envelope)
       http_post("/publish", body)
+    end
+
+    # The project's key, which signs every request, so the bus can tell
+    # the project's addresses are its own (see `Signing`). The
+    # session-start hook makes it; until it has, requests go unsigned.
+    def key : Key?
+      @key ||= begin
+        @self_config.try(&.key)
+      rescue ex
+        STDERR.puts "Arcana MCP bridge: can't read the project's key, so requests go unsigned: #{ex.message}"
+        nil
+      end
+    end
+
+    # `body` with the envelope's correlation id and time, and, when the
+    # project has a key, the envelope's signature, so whoever gets it can
+    # check who sent it without trusting the bus.
+    private def with_signature(body : Hash(String, JSON::Any), envelope : Envelope) : String
+      body["correlation_id"] = JSON::Any.new(envelope.correlation_id)
+      body["timestamp"] = JSON::Any.new(envelope.timestamp.to_rfc3339)
+      if (key = self.key) && (sig = envelope.signed(key).signature)
+        body["signature"] = JSON.parse({key: sig.key, sig: sig.sig}.to_json)
+      end
+      body.to_json
     end
 
     private def default_from : String
@@ -717,16 +746,25 @@ module Arcana
     end
 
     private def http_get(path : String) : String
-      request { @http.get(path, headers: auth_headers) }.body
+      request { @http.get(path, headers: signed_headers("GET", path, "")) }.body
     end
 
     private def http_post(path : String, body : String) : String
-      request { @http.post(path, headers: json_headers, body: body) }.body
+      request { @http.post(path, headers: json_headers(path, body), body: body) }.body
     end
 
-    private def json_headers : HTTP::Headers
-      headers = auth_headers
+    private def json_headers(path : String, body : String) : HTTP::Headers
+      headers = signed_headers("POST", path, body)
       headers["Content-Type"] = "application/json"
+      headers
+    end
+
+    # Auth headers, and the request's signature when the project has a key.
+    private def signed_headers(method : String, path : String, body : String) : HTTP::Headers
+      headers = auth_headers
+      if key = self.key
+        headers.merge!(Signing.sign_request(key, method, @bus_host, path, body))
+      end
       headers
     end
 

@@ -321,6 +321,16 @@ bus.topic_log("#releases").read(after: last_read)  # anyone reads, nothing consu
 bus.subscribe("#releases", "writer")               # optional notifications
 ```
 
+### Proving who sends
+
+Each project has an Ed25519 key, `.ai/arcana.key`, which `arcana hook`
+makes at session start. The MCP bridge and the hooks sign every request
+with it, and `Arcana::Client.new(key:)` signs its join and its messages.
+The bus holds the project's addresses for its key and stamps each
+message it can vouch for `verified`; the message also carries the
+sender's signature, which the receiver can check itself. Wire details,
+for clients in other languages: [doc/PROTOCOL.md](doc/PROTOCOL.md).
+
 ### Topics
 
 A `#topic` is a log that everyone on the bus shares, instead of a copy in

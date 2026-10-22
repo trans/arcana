@@ -292,3 +292,42 @@ describe Arcana::MCP do
     end
   end
 end
+
+describe "Arcana::MCP with the project's key" do
+  call = ->(mcp : Arcana::MCP, tool : String, args : String) {
+    msg = JSON.parse(%({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"#{tool}","arguments":#{args}}}))
+    JSON.parse(mcp.test_handle(msg).not_nil!["result"]["content"][0]["text"].as_s)
+  }
+
+  it "signs what it sends, so the bus holds the handle for the key and the receiver can check it" do
+    dir = File.tempname("arcana-mcp-keyed")
+    Dir.mkdir_p(File.join(dir, ".ai"))
+    File.write(File.join(dir, ".ai", "config.yml"), "handle: proj\n")
+    bus = Arcana::Bus.new
+    directory = Arcana::Directory.new
+    bus.directory = directory
+    directory.register(Arcana::Directory::Listing.new(address: "@peer", name: "@peer", description: "",
+      kind: Arcana::Directory::Kind::Agent))
+    inbox = bus.mailbox("@peer")
+    server = Arcana::Server.new(bus, directory, host: "127.0.0.1", port: 14910)
+    server.start_in_background
+    begin
+      unsigned = Arcana::MCP.new(base_url: "http://127.0.0.1:14910", project_dir: dir)
+      unsigned.key.should be_nil # the session-start hook makes it, not the bridge
+      key = Arcana::AgentConfig.load(dir).key!
+
+      mcp = Arcana::MCP.new(base_url: "http://127.0.0.1:14910", project_dir: dir)
+      call.call(mcp, "arcana_register", %({"address":"@proj","kind":"agent"}))["listing"]["key"].should eq(key.public_key)
+
+      call.call(mcp, "arcana_deliver", %({"to":"@peer","subject":"hi","payload":{"text":"hello"}}))
+      got = inbox.receive(1.second).not_nil!
+      got.from.should eq("@proj")
+      got.verified.should be_true
+      got.signer.should eq(key.public_key)
+      got.id.should_not be_nil
+    ensure
+      server.stop
+      FileUtils.rm_rf(dir)
+    end
+  end
+end
