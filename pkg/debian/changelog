@@ -1,3 +1,21 @@
+arcana (0.37.0-1) unstable; urgency=medium
+
+  * Projects prove their addresses with an Ed25519 key (arcana-core
+    0.21.0). The session-start hook makes `.ai/arcana.key` (0600, kept
+    out of git) and moves the project's handle to it, and the hook and
+    the MCP bridge sign every request with it. A WebSocket client that
+    offers a key at join signs a challenge naming the bus; a signed REST
+    request is checked (time within 60 s, nonce used once) and refused
+    with 401 when it isn't right. The bus stamps a message `verified`
+    when its sender proved `from`, and passes on the sender's own
+    signature so the receiver can check it too. Listings show the key
+    that holds them. Nothing is refused yet for lacking proof: unproven
+    joins and reads are logged (`join.unproven`, `read.unproven`), and
+    `message.sent` events record `verified`. Wire details in
+    doc/PROTOCOL.md.
+
+ -- trans <transfire@gmail.com>  Thu, 22 Oct 2026 23:30:00 +0000
+
 arcana (0.36.4-1) unstable; urgency=medium
 
   * A WebSocket join can show an owner token (arcana-core 0.20.1:
