@@ -1,3 +1,17 @@
+arcana (0.36.4-1) unstable; urgency=medium
+
+  * A WebSocket join can show an owner token (arcana-core 0.20.1:
+    `Client.new(owner_token:)`), which claims the address as
+    `POST /register` does; a join showing another token is refused.
+    Before, a client joining an address held under an owner token, as an
+    agent's handle is, was attached to its mailbox, and its disconnect
+    unregistered the address, dropping the owner token and the mailbox
+    with any unread mail. A held address now stays listed, its mailbox
+    collecting, after a disconnect. A join without the token is still
+    let through, and logged as `join.unproven`.
+
+ -- trans <transfire@gmail.com>  Thu, 22 Oct 2026 22:30:00 +0000
+
 arcana (0.36.3-1) unstable; urgency=medium
 
   * The bus refuses web pages. Any page open in a browser on the machine
