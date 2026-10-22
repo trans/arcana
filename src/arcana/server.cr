@@ -62,7 +62,7 @@ module Arcana
     def start
       server = HTTP::Server.new([
         LocalGuard.new(@host, @allowed_hosts, @events),
-        WebSocketHandler.new(@bus, @directory, auth_required: @auth_required, events: @events),
+        WebSocketHandler.new(@bus, @directory, auth_required: @auth_required, events: @events, state_saver: @state_saver),
       ]) do |ctx|
         handle_rest(ctx)
       end
@@ -914,9 +914,14 @@ module Arcana
         @directory : Directory,
         @auth_required : Bool = false,
         @events : Events::Backend? = nil,
+        @state_saver : Proc(Nil)? = nil,
       )
         @connections = {} of String => HTTP::WebSocket
         @mutex = Mutex.new
+      end
+
+      private def save_state
+        @state_saver.try &.call
       end
 
       def call(context : HTTP::Server::Context)
@@ -981,23 +986,44 @@ module Arcana
               listed = parsed.bool?("listed")
               listed = true if listed.nil?
 
-              # Register in directory unless already present (allows reconnection
-              # after restart when state was loaded from disk).
-              if listed && !@directory.lookup(raw)
-                kind_str = parsed.str?("kind")
-                kind = case kind_str
-                       when "service" then Directory::Kind::Service
-                       when "agent"   then Directory::Kind::Agent
-                       end
-                @directory.register(Directory::Listing.new(
-                  address: raw,
-                  name: parsed.str?("name") || raw,
-                  description: parsed.str("description"),
-                  kind: kind,
-                  guide: parsed.str?("guide"),
-                  schema: parsed["schema"]?,
-                  tags: parsed.str_arr("tags"),
+              kind_str = parsed.str?("kind")
+              kind = case kind_str
+                     when "service" then Directory::Kind::Service
+                     when "agent"   then Directory::Kind::Agent
+                     end
+              listing = Directory::Listing.new(
+                address: raw,
+                name: parsed.str?("name") || raw,
+                description: parsed.str("description"),
+                kind: kind,
+                guide: parsed.str?("guide"),
+                schema: parsed["schema"]?,
+                tags: parsed.str_arr("tags"),
+              )
+
+              # With an owner token, the join claims the address as
+              # POST /register does, and a join showing another token is
+              # refused (HeldError). Without one, an address held under a
+              # token is still joined for now, but the event log records
+              # it, so the clients that would break are known before
+              # joins need the token.
+              if owner_token = parsed.str?("owner_token").try(&.presence)
+                if listed
+                  @directory.claim(listing, owner_token)
+                  save_state
+                else
+                  @directory.check_owner!(raw, owner_token)
+                end
+              elsif @directory.held?(raw)
+                @events.try &.record(Events::Event.new(
+                  type: "join.unproven",
+                  subject: raw,
+                  metadata: {"reason" => JSON::Any.new("joined without the owner token the address is held under")} of String => JSON::Any,
                 ))
+              elsif listed && !@directory.lookup(raw)
+                # Register in directory unless already present (allows reconnection
+                # after restart when state was loaded from disk).
+                @directory.register(listing)
               end
 
               # Create mailbox on local bus
@@ -1040,11 +1066,16 @@ module Arcana
           end
         end
 
+        # An address held under an owner token outlives the connection, as
+        # an agent's handle outlives its session: it stays listed, and its
+        # mailbox keeps collecting.
         ws.on_close do
           if addr = address
-            @mutex.synchronize { @connections.delete(addr) }
-            @directory.unregister(addr)
-            @bus.remove_mailbox(addr)
+            @mutex.synchronize { @connections.delete(addr) if @connections[addr]? == ws }
+            unless @directory.held?(addr)
+              @directory.unregister(addr)
+              @bus.remove_mailbox(addr)
+            end
           end
         end
 

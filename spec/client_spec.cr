@@ -146,3 +146,119 @@ describe Arcana::Client do
     end
   end
 end
+
+# Joining an address held under an owner token (as an agent's handle is,
+# by `arcana hook`).
+describe "Arcana::Client joining a held address" do
+  agent = ->(address : String) do
+    Arcana::Directory::Listing.new(address: address, name: address, description: "d",
+      kind: Arcana::Directory::Kind::Agent)
+  end
+
+  it "claims the address with an owner token, and keeps it, mailbox and all, after disconnecting" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+    bus.directory = dir
+    server = Arcana::Server.new(bus, dir, port: 14220)
+    server.start_in_background
+    client = Arcana::Client.new(url: "ws://127.0.0.1:14220/bus", address: "@proj",
+      kind: Arcana::Directory::Kind::Agent, owner_token: "tok")
+    begin
+      spawn { client.connect }
+      sleep 100.milliseconds
+      dir.held?("@proj").should be_true
+      client.close
+      sleep 100.milliseconds
+
+      dir.lookup("@proj").should_not be_nil
+      dir.held?("@proj").should be_true
+      bus.send(Arcana::Envelope.new(from: "@x", to: "@proj", subject: "later"))
+      bus.mailbox("@proj").receive(1.second).not_nil!.subject.should eq("later")
+    ensure
+      client.close
+      server.stop
+    end
+  end
+
+  it "refuses a join showing another owner token, leaving the mailbox alone" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+    bus.directory = dir
+    dir.claim(agent.call("@proj"), "tok")
+    mailbox = bus.mailbox("@proj")
+    server = Arcana::Server.new(bus, dir, port: 14221)
+    server.start_in_background
+    frames = Channel(String).new(10)
+    ws = HTTP::WebSocket.new(URI.parse("ws://127.0.0.1:14221/bus"))
+    ws.on_message { |msg| frames.send(msg) }
+    begin
+      spawn { ws.run }
+      ws.send({type: "join", address: "@proj", owner_token: "other"}.to_json)
+      select
+      when frame = frames.receive
+        frame.should contain("held by another owner")
+      when timeout(2.seconds)
+        fail "no refusal"
+      end
+
+      bus.send(Arcana::Envelope.new(from: "@x", to: "@proj", subject: "mine"))
+      mailbox.receive(1.second).not_nil!.subject.should eq("mine")
+      ws.close
+      sleep 100.milliseconds
+      dir.held?("@proj").should be_true
+    ensure
+      server.stop
+    end
+  end
+
+  it "still joins a held address without its token, records that, and doesn't unregister it on leaving" do
+    log_dir = File.tempname("arcana-join-events")
+    backend = Arcana::Events::FileBackend.new(log_dir: log_dir, retain_days: 7)
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+    bus.directory = dir
+    dir.claim(agent.call("@game"), "tok")
+    server = Arcana::Server.new(bus, dir, port: 14222)
+    server.events = backend
+    server.start_in_background
+    client = Arcana::Client.new(url: "ws://127.0.0.1:14222/bus", address: "@game",
+      kind: Arcana::Directory::Kind::Agent)
+    begin
+      spawn { client.connect }
+      sleep 100.milliseconds
+      client.close
+      sleep 100.milliseconds
+
+      dir.held?("@game").should be_true
+      bus.has_mailbox?("@game").should be_true
+      backend.query(type: "join.unproven").map(&.subject).should eq(["@game"])
+    ensure
+      client.close
+      server.stop
+      backend.close
+      FileUtils.rm_rf(log_dir)
+    end
+  end
+
+  it "unregisters an address held without a token when its client leaves, as before" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+    bus.directory = dir
+    server = Arcana::Server.new(bus, dir, port: 14223)
+    server.start_in_background
+    client = Arcana::Client.new(url: "ws://127.0.0.1:14223/bus", address: "svc:thing",
+      kind: Arcana::Directory::Kind::Service)
+    begin
+      spawn { client.connect }
+      sleep 100.milliseconds
+      dir.lookup("svc:thing").should_not be_nil
+      client.close
+      sleep 100.milliseconds
+      dir.lookup("svc:thing").should be_nil
+      bus.has_mailbox?("svc:thing").should be_false
+    ensure
+      client.close
+      server.stop
+    end
+  end
+end
