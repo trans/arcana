@@ -157,10 +157,10 @@ module Arcana
       Key.load(path) if File.exists?(path)
     end
 
-    # The project's key, made on first use.
+    # The project's key, made on first use. Each call also checks that
+    # git ignores it, which a key made by an older hook may lack.
     def key! : Key
       path = key_path
-      return Key.load(path) if File.exists?(path)
       Dir.mkdir_p(File.dirname(path))
       key = Key.load_or_create(path)
       exclude_from_git(KEY_FILE, "Arcana key (private, machine-local, see arcana hook)") if ai_dir?
@@ -188,15 +188,16 @@ module Arcana
       token
     end
 
-    # The owner token, made on first use.
+    # The owner token, made on first use. Each call also checks that git
+    # ignores it, as `key!` does.
     def owner_token! : String
-      if token = owner_token
-        return token
+      token = owner_token || begin
+        path = token_path
+        Dir.mkdir_p(File.dirname(path))
+        made = Random::Secure.hex(16)
+        File.write(path, "#{made}\n", perm: 0o600)
+        made
       end
-      path = token_path
-      Dir.mkdir_p(File.dirname(path))
-      token = Random::Secure.hex(16)
-      File.write(path, "#{token}\n", perm: 0o600)
       exclude_from_git(TOKEN_FILE) if ai_dir?
       token
     end
@@ -204,15 +205,21 @@ module Arcana
     # List `file` (in `.ai/`) in the repository's `info/exclude`, which
     # keeps it out of commits without touching any tracked file. The
     # repository is the one the file is in: when `.ai` is a link to
-    # another project's, that project's.
+    # another project's, that project's. The pattern is the file's path
+    # from the top of its checkout, which is just `/arcana.key` when `.ai`
+    # is a checkout of its own: a worktree of the `ai` branch, or a clone.
+    # Every worktree shares `info/exclude`, so that pattern also ignores
+    # an `arcana.key` at the top of the code checkout, which is harmless.
     private def exclude_from_git(file : String, comment : String = "Arcana owner token (machine-local, see arcana hook)") : Nil
       ai = File.realpath(File.join(@project_dir, ".ai"))
       buffer = IO::Memory.new
-      status = Process.run("git", ["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"],
+      status = Process.run("git", ["rev-parse", "--path-format=absolute", "--git-path", "info/exclude", "--show-prefix"],
         chdir: ai, output: buffer, error: Process::Redirect::Close)
       return unless status.success?
-      exclude = buffer.to_s.strip
-      pattern = "**/.ai/#{file}"
+      lines = buffer.to_s.lines
+      exclude = lines[0]?.presence || return
+      prefix = lines[1]? || ""
+      pattern = "/" + "#{prefix}#{file}".gsub(/[\\*?\[]/) { |c| "\\#{c}" }
       return if File.exists?(exclude) && File.read_lines(exclude).includes?(pattern)
       Dir.mkdir_p(File.dirname(exclude))
       File.open(exclude, "a") { |f| f.puts "# #{comment}\n#{pattern}" }

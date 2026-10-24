@@ -156,7 +156,7 @@ describe Arcana::AgentConfig do
         cfg.token_path.should eq(File.join(dir, ".ai", "arcana.token"))
         cfg.owner_token!.should eq(token)
         (File.info(cfg.token_path).permissions.value & 0o077).should eq(0)
-        File.read(File.join(dir, ".git", "info", "exclude")).should contain("**/.ai/arcana.token")
+        File.read(File.join(dir, ".git", "info", "exclude")).should contain("/.ai/arcana.token")
 
         status = IO::Memory.new
         Process.run("git", ["status", "--porcelain", "--untracked-files=all"], chdir: dir, output: status)
@@ -176,7 +176,7 @@ describe Arcana::AgentConfig do
         cfg.key!.public_key.should eq(key.public_key)
         cfg.key.not_nil!.public_key.should eq(key.public_key)
         (File.info(cfg.key_path).permissions.value & 0o077).should eq(0)
-        File.read(File.join(dir, ".git", "info", "exclude")).should contain("**/.ai/arcana.key")
+        File.read(File.join(dir, ".git", "info", "exclude")).should contain("/.ai/arcana.key")
 
         status = IO::Memory.new
         Process.run("git", ["status", "--porcelain", "--untracked-files=all"], chdir: dir, output: status)
@@ -194,9 +194,57 @@ describe Arcana::AgentConfig do
         File.symlink("main/.ai", File.join(dir, "group", ".ai"))
         cfg = Arcana::AgentConfig.find(File.join(dir, "group"))
         cfg.key!
-        File.read(File.join(main, ".git", "info", "exclude")).should contain("**/.ai/arcana.key")
+        File.read(File.join(main, ".git", "info", "exclude")).should contain("/.ai/arcana.key")
         status = IO::Memory.new
         Process.run("git", ["status", "--porcelain", "--untracked-files=all"], chdir: main, output: status)
+        status.to_s.should_not contain("arcana.key")
+      end
+    end
+  end
+
+  it "excludes the key and token where .ai is a worktree, as dot-ai sets it up, even for a key made before" do
+    with_clean_env do
+      dir = File.tempname("arcana-ai-worktree")
+      Dir.mkdir_p(dir)
+      begin
+        Process.run("git", ["init", "-q", dir])
+        Process.run("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"], chdir: dir)
+        Process.run("git", ["branch", "ai"], chdir: dir)
+        Process.run("git", ["worktree", "add", "-q", ".ai", "ai"], chdir: dir)
+        ai = File.join(dir, ".ai")
+        File.write(File.join(ai, "config.yml"), CONFIG)
+        old = Arcana::Key.generate
+        old.save(File.join(ai, "arcana.key"))
+
+        cfg = Arcana::AgentConfig.load(dir)
+        cfg.key!.public_key.should eq(old.public_key)
+        cfg.owner_token!
+        exclude = File.read(File.join(dir, ".git", "info", "exclude"))
+        exclude.lines.should contain("/arcana.key")
+        exclude.lines.should contain("/arcana.token")
+        status = IO::Memory.new
+        Process.run("git", ["status", "--porcelain", "--untracked-files=all"], chdir: ai, output: status)
+        status.to_s.should contain("config.yml")
+        status.to_s.should_not contain("arcana.key")
+        status.to_s.should_not contain("arcana.token")
+
+        cfg.key!
+        File.read(File.join(dir, ".git", "info", "exclude")).should eq(exclude)
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
+  it "excludes the key where .ai is a repository of its own" do
+    with_clean_env do
+      project(CONFIG) do |dir|
+        ai = File.join(dir, ".ai")
+        Process.run("git", ["init", "-q", ai])
+        Arcana::AgentConfig.load(dir).key!
+        File.read(File.join(ai, ".git", "info", "exclude")).lines.should contain("/arcana.key")
+        status = IO::Memory.new
+        Process.run("git", ["status", "--porcelain", "--untracked-files=all"], chdir: ai, output: status)
         status.to_s.should_not contain("arcana.key")
       end
     end
@@ -218,7 +266,7 @@ describe Arcana::AgentConfig do
         after.owner_token!.should eq(token)
         File.exists?(old_path).should be_false
         (File.info(after.token_path).permissions.value & 0o077).should eq(0)
-        File.read(File.join(dir, ".git", "info", "exclude")).should contain("**/.ai/arcana.token")
+        File.read(File.join(dir, ".git", "info", "exclude")).should contain("/.ai/arcana.token")
       ensure
         FileUtils.rm_rf(dir)
       end
