@@ -1,3 +1,28 @@
+arcana (0.38.0-1) unstable; urgency=medium
+
+  * Arcana can carry a machine's mail between projects, as dot-ai-mail
+    does: with git config `ai.carrier arcana`, `arcana mail deliver`,
+    `check`, `topic`, `read` and `find` work through the same outbox,
+    inbox, sent, topic and receipt files and locks (dot-ai's spec, "The
+    carrier's files"), printing the same lines, and dot-ai's tests pass
+    against it. The hooks then deliver the outbox and tell of mail, new
+    posts in followed topics and read receipts. Mail for an address no
+    project here has goes over the bus, from the project's handle,
+    signed with its key. Each run reads `ai.carrier` afresh.
+  * Under any other carrier (`local`, the default), Arcana stays out of
+    mail: `arcana_deliver` to a project on this machine and
+    `arcana_publish` to a `#topic` are refused, pointing to the outbox.
+    Services and agents found only on the bus are reached as before.
+  * A new `arcana hook prompt` (UserPromptSubmit): when a session's
+    project now has another handle than the one it registered (a new
+    `.ai/` above where it started), the prompt and Stop hooks register
+    the project's handle and tell the agent.
+  * `arcana setup` adds the prompt hook, and no longer replaces other
+    hooks or permission rules in ~/.claude/settings.json: it adds its
+    entries only where they're missing.
+
+ -- trans <transfire@gmail.com>  Thu, 29 Oct 2026 20:00:00 +0000
+
 arcana (0.37.1-1) unstable; urgency=high
 
   * The session-start hook now keeps `arcana.key` and `arcana.token` out
