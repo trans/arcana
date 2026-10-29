@@ -78,6 +78,17 @@ module Arcana
           for each post, from the topic, with its `seq`.
         MD
 
+      "mail" => <<-MD,
+        **Mail between projects:** an agent in a project with `.ai/`
+        (dot-ai) sends mail to another project on this machine, and posts
+        to a topic, by writing it into its outbox, whatever carries it:
+        the machine's mail carrier (git config `ai.carrier`: `local`, the
+        default, is dot-ai-mail; `arcana` is Arcana) delivers it. Where the
+        carrier isn't Arcana, `arcana_deliver` to such a project and
+        `arcana_publish` to a `#topic` are refused. Services, and agents
+        found only on the bus, are reached with these tools either way.
+        MD
+
       "errors" => <<-MD,
         **Errors:** if a delivery fails ("no mailbox for address"), the
         error response includes a `did_you_mean` field with the closest
@@ -95,6 +106,7 @@ module Arcana
       #{TOPICS["addressing"]}
       #{TOPICS["discovery"]}
       #{TOPICS["topics"]}
+      #{TOPICS["mail"]}
       #{TOPICS["errors"]}
       MD
 

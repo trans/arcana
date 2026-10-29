@@ -126,7 +126,7 @@ module Arcana
     # `@` plus the directory name, folded into a legal handle.
     def self.fallback_handle(project_dir : String) : String
       name = File.basename(project_dir).downcase.gsub(/[^a-z0-9-]+/, "-").strip('-')
-      name = "agent-#{name}" unless name =~ /\A[a-z]/
+      name = name.empty? ? "agent" : "agent-#{name}" unless name =~ /\A[a-z]/
       "@#{name}"
     end
 

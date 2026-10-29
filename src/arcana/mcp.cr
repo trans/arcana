@@ -39,7 +39,7 @@ module Arcana
       },
       {
         name:        "arcana_deliver",
-        description: "Send a message on the Arcana bus. By default (ordering: auto), the bus decides sync vs async based on the target: services get sync (blocks for reply), agents get async (fire and forget, check arcana_receive later). Override with ordering 'sync' or 'async'. The response tells you which mode was used and the correlation_id for tracking. Each message from the project's own handle to an agent gets its dot-ai message id (the response's `id`), carried with it; in a project with `.ai/mail/sent/`, it is also filed there as the sender's copy, named in the response's `sent_file`: don't file it again. To answer a message, pass its id (its inbox file's `Id:`) as `re`.",
+        description: "Send a message on the Arcana bus. By default (ordering: auto), the bus decides sync vs async based on the target: services get sync (blocks for reply), agents get async (fire and forget, check arcana_receive later). Override with ordering 'sync' or 'async'. The response tells you which mode was used and the correlation_id for tracking. Each message from the project's own handle to an agent gets its dot-ai message id (the response's `id`), carried with it; in a project with `.ai/mail/sent/`, it is also filed there as the sender's copy, named in the response's `sent_file`: don't file it again. To answer a message, pass its id (its inbox file's `Id:`) as `re`. Mail to an agent whose project is on this machine goes through your project's outbox instead (the dot-ai skill), and where the machine's mail carrier isn't Arcana (git config ai.carrier), this tool refuses it.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -56,7 +56,7 @@ module Arcana
       },
       {
         name:        "arcana_publish",
-        description: "Post to a topic on the Arcana bus. A `#topic` (registered with arcana_register kind \"topic\") is a shared log: the post is stored once and numbered, anyone reads it with arcana_inbox, and subscribers get a short notification. The reply gives the post's number (`seq`). A topic name without `#` sends every subscriber a full copy instead.",
+        description: "Post to a topic on the Arcana bus. A `#topic` (registered with arcana_register kind \"topic\") is a shared log: the post is stored once and numbered, anyone reads it with arcana_inbox, and subscribers get a short notification. The reply gives the post's number (`seq`). A topic name without `#` sends every subscriber a full copy instead. A topic kept as files on this machine (the dot-ai skill's Topics) takes posts through your project's outbox, and where the machine's mail carrier isn't Arcana (git config ai.carrier), every `#topic` does: this tool refuses those.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -341,6 +341,9 @@ module Arcana
       # As the daemon will have it, so the copy filed below says the same.
       payload = Server.normalize_payload(args["payload"]?)
       return NOTHING_TO_SEND if to.starts_with?('@') && subject.blank? && empty?(payload)
+      if refusal = not_ours(to)
+        return refusal
+      end
       time = Time.utc
       mail = outbound_mail(from, to, subject, payload, time)
       envelope = Envelope.new(from: from, to: to, subject: subject, payload: payload,
@@ -423,6 +426,9 @@ module Arcana
       return BAD_RE if re && !re.matches?(Envelope::REPLY_TO)
       from = args.str("from", default_from)
       topic = args.str("topic")
+      if refusal = not_ours(topic)
+        return refusal
+      end
       subject = args.str("subject")
       # As the daemon would have it; a signed payload is left as it is.
       payload = Server.normalize_payload(args["payload"]?)
@@ -437,6 +443,35 @@ module Arcana
         re:      re,
       }.to_json).as_h, envelope)
       http_post("/publish", body)
+    end
+
+    # Mail between the projects on this machine, and posts to its topics,
+    # go through the sender's outbox, and the machine's carrier (git
+    # config's `ai.carrier`, see `Mail`) takes them from there. Where
+    # that's dot-ai-mail, Arcana stays out of mail, so mail to a project
+    # here and a post to any topic are refused, saying where they go;
+    # where it's Arcana, only a post to a topic kept as files here.
+    # Calls to services, and mail to agents found only on the bus, go
+    # either way. Nil when the message may go.
+    private def not_ours(to : String) : String?
+      here = @self_config.try(&.project_dir) || Dir.current
+      carrier = Mail.carrier
+      if to.starts_with?('#')
+        home = Mail.topic_home(here)[0]
+        if carrier != Mail::NAME
+          {error: "Not posted: this machine's mail carrier is #{carrier} (git config ai.carrier), " \
+                  "which keeps topics as files, so a post to #{to} goes through your project's outbox: " \
+                  "write it into .ai/mail/outbox/ addressed to #{to}, as the dot-ai skill says (Topics)."}.to_json
+        elsif home && Dir.exists?(File.join(home, to.lchop('#')))
+          {error: "Not posted: #{to} is a topic kept as files on this machine, so a post to it goes " \
+                  "through your project's outbox: write it into .ai/mail/outbox/ addressed to #{to}, " \
+                  "as the dot-ai skill says (Topics)."}.to_json
+        end
+      elsif to.starts_with?('@') && carrier != Mail::NAME && Mail.scan(here).any? { |entry| entry[0] == to }
+        {error: "Not sent: #{to} is a project on this machine, and this machine's mail carrier is " \
+                "#{carrier} (git config ai.carrier), so mail to it goes through your project's outbox: " \
+                "write it into .ai/mail/outbox/, as the dot-ai skill says (Sending)."}.to_json
+      end
     end
 
     # The project's key, which signs every request, so the bus can tell

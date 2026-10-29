@@ -14,14 +14,28 @@ module Arcana
   #   context, who it is on the bus and that a "held" handle is its own.
   # - `stop`: asks the agent to read waiting mail before it stops, once
   #   per change in the count.
+  # - `prompt`: as the user's prompt goes to the agent.
+  # - At `stop` and `prompt`, a session whose project now has another
+  #   handle than the one it registered (a new `.ai/` appeared above where
+  #   it started) registers the new one and tells the agent
+  #   (`follow_project`).
   # - `session-end`: moves unread mail into `.ai/mail/inbox/` as notes (when
   #   the project has `.ai/`), then marks the handle offline. The handle stays
   #   registered, so mail sent between sessions waits for the next agent.
   #
+  # Mail between projects is the machine's carrier's (git config's
+  # `ai.carrier`, see `Mail`). Where Arcana is the carrier, the hooks also
+  # do what dot-ai-mail's do (`Mail::Notices`): deliver the outbox, and
+  # tell of the inbox, followed topics' new posts and receipts. Under
+  # either carrier, mail from agents still waiting on the bus is written
+  # into the project's inbox as inbox files (`drain_mail`), so the agent
+  # meets all mail the same way, through the inbox; under another carrier
+  # Arcana says nothing of it, and that carrier tells of it.
+  #
   # A hook must never break the session: a bus that is down, or any other
   # error, means no output and exit 0.
   module Hook
-    EVENTS = {"session-start", "stop", "session-end"}
+    EVENTS = {"session-start", "stop", "prompt", "session-end"}
 
     # Returns the process exit code.
     def self.run(args : Array(String), input : IO = STDIN, output : IO = STDOUT, error : IO = STDERR,
@@ -32,7 +46,13 @@ module Arcana
         return 1
       end
       agent = (i = args.index("--agent")) ? args[i + 1]? : nil
-      agent ||= ENV["CLAUDE_PROJECT_DIR"]? ? "claude" : "codex"
+      # Without --agent (a plugin's hooks): Codex sets PLUGIN_ROOT, Claude
+      # Code doesn't; Claude Code sets CLAUDE_PROJECT_DIR
+      agent ||= if ENV["PLUGIN_ROOT"]?.presence
+                  "codex"
+                else
+                  ENV["CLAUDE_PROJECT_DIR"]? ? "claude" : "codex"
+                end
 
       payload = begin
         JSON.parse(input.gets_to_end.presence || "{}")
@@ -42,16 +62,28 @@ module Arcana
       start = ENV["CLAUDE_PROJECT_DIR"]?.try(&.presence) ||
               payload["cwd"]?.try(&.as_s?).try(&.presence) || Dir.current
       project_dir = AgentConfig.project_root(start)
+      mail = mail_root(start)
+      session = payload["session_id"]?.try(&.as_s?).try(&.gsub(/[^A-Za-z0-9_.-]/, "_"))
 
       bus = Rest.new(base_url)
       case event
-      when "session-start" then session_start(bus, project_dir, output, AgentConfig.broken_link(start))
-      when "stop"          then stop(bus, project_dir, agent, payload, output, error)
-      else                      session_end(bus, project_dir, payload)
+      when "session-start" then session_start(bus, project_dir, output, AgentConfig.broken_link(start), mail, session)
+      when "stop"          then stop(bus, project_dir, agent, payload, output, error, mail, session)
+      when "prompt"        then prompt(bus, project_dir, agent, output, mail, session)
+      else                      session_end(bus, project_dir, payload, mail, session)
       end
     rescue ex
       error.puts "arcana hook: #{ex.message}"
       0
+    end
+
+    # The project whose mail Arcana carries: the one at or above `start`
+    # (`Mail.project_root`), when Arcana is the machine's carrier and the
+    # project has `.ai/mail/`. Nil otherwise.
+    def self.mail_root(start : String) : String?
+      return nil unless Mail.carrier?
+      root = Mail.project_root(start) || return nil
+      root if Dir.exists?(File.join(root, ".ai", "mail"))
     end
 
     # -- session-start --
@@ -59,8 +91,9 @@ module Arcana
     # `broken_link` is an `.ai` link on the way to the project whose target
     # is gone (`AgentConfig.broken_link`): the agent is told, whether or not
     # the bus is up, since it means the session is likely in the wrong
-    # project.
-    def self.session_start(bus : Rest, project_dir : String, output : IO, broken_link : String? = nil) : Int32
+    # project. With `mail` (`mail_root`), the mail notices follow.
+    def self.session_start(bus : Rest, project_dir : String, output : IO, broken_link : String? = nil,
+                           mail : String? = nil, session : String? = nil) : Int32
       warning = broken_link.try do |link|
         "Warning: #{link} is a link to #{File.readlink(link)}, which doesn't exist, so this session " \
         "isn't in the project the link was meant to lead to: it is in #{project_dir}. " \
@@ -69,7 +102,8 @@ module Arcana
       cfg = begin
         AgentConfig.load(project_dir)
       rescue ex : AgentConfig::Error
-        emit_context(output, "SessionStart", [warning, "Arcana: not registered: #{ex.message}"].compact.join("\n"))
+        notices = mail.try { |m| Mail::Notices.collect("session-start", m, session).presence }
+        emit_context(output, "SessionStart", [warning, "Arcana: not registered: #{ex.message}", notices].compact.join("\n"))
         return 0
       end
 
@@ -88,17 +122,18 @@ module Arcana
         description: cfg.description,
         owner_token: cfg.owner_token!,
       })
-      unless status && body # bus not running
-        emit_context(output, "SessionStart", warning) if warning
-        return 0
-      end
-
-      text = case status
-             when 200 then registered_text(cfg, bus, body)
-             when 409 then held_text(cfg, body)
-             else          "Arcana: registering #{cfg.handle} failed: #{body["error"]?.try(&.as_s?) || "status #{status}"}"
+      remember_handle(session, cfg.handle) if status
+      text = if status && body
+               drain_mail(bus, cfg) if status == 200
+               case status
+               when 200 then registered_text(cfg, bus, body)
+               when 409 then held_text(cfg, body)
+               else          "Arcana: registering #{cfg.handle} failed: #{body["error"]?.try(&.as_s?) || "status #{status}"}"
+               end
              end
-      emit_context(output, "SessionStart", [warning, text].compact.join("\n"))
+      notices = mail.try { |m| Mail::Notices.collect("session-start", m, session).presence }
+      context = [warning, text, notices].compact.join("\n").chomp
+      emit_context(output, "SessionStart", context) unless context.empty?
       0
     end
 
@@ -112,7 +147,9 @@ module Arcana
       lines = [
         "You are #{cfg.handle} on the Arcana bus: #{how}. " \
         "If Arcana says #{cfg.handle} is already registered or held, that is you, not another agent: " \
-        "don't register again or pick another name. Send with from: \"#{cfg.handle}\".",
+        "don't register again or pick another name for that. Send with from: \"#{cfg.handle}\". " \
+        "If this session's project changes (a new .ai/ above where it started), the hooks register " \
+        "that project's handle at the next prompt and say so: that one is you then.",
       ]
       pending = bus.pending(cfg.handle)
       if pending && pending > 0
@@ -145,12 +182,28 @@ module Arcana
     # Keeps the agent going once per change in the count, so mail it
     # leaves for later never loops it: Claude by exit 2 (stderr is shown to
     # the agent), Codex by `decision: block`.
+    #
+    # A project with `.ai/mail/inbox/` has its bus mail written there
+    # instead (`drain_mail`). Then, with `mail` (`mail_root`), Arcana tells
+    # what dot-ai-mail's Stop hook would (`Mail::Notices`), and otherwise
+    # nothing: the machine's carrier tells of the inbox.
     def self.stop(bus : Rest, project_dir : String, agent : String, payload : JSON::Any,
-                  output : IO, error : IO) : Int32
-      handle = AgentConfig.load(project_dir).handle
+                  output : IO, error : IO, mail : String? = nil, session : String? = nil) : Int32
+      cfg = AgentConfig.load(project_dir)
+      handle = cfg.handle
+      moved = follow_project(bus, cfg, session)
+      if Dir.exists?(File.join(cfg.project_dir, ".ai", "mail", "inbox"))
+        bus.key = (cfg.key rescue nil)
+        drain_mail(bus, cfg)
+        text = [moved, mail.try { |m| Mail::Notices.collect("stop", m, session).presence }].compact.join("\n")
+        return keep_going(agent, text, output, error) unless text.empty?
+        output.puts "{}" if agent == "codex"
+        return 0
+      end
       pending = bus.pending(handle) || 0
       flag = mail_flag(handle)
       told = File.exists?(flag) && File.read(flag).strip == pending.to_s
+      return keep_going(agent, moved, output, error) if moved && (pending == 0 || told)
       if pending == 0 || told
         File.delete(flag) if pending == 0 && File.exists?(flag)
         output.puts "{}" if agent == "codex"
@@ -160,12 +213,95 @@ module Arcana
       File.write(flag, pending.to_s)
       text = "You have mail! (#{pending} message#{pending == 1 ? "" : "s"} on the Arcana bus " \
              "for #{handle}: arcana_inbox, then arcana_receive.)"
+      keep_going(agent, [moved, text].compact.join("\n"), output, error)
+    end
+
+    # Keeps the agent going once, to deal with `text`.
+    private def self.keep_going(agent : String, text : String, output : IO, error : IO) : Int32
+      text = text.chomp
       if agent == "codex"
         output.puts({decision: "block", reason: text}.to_json)
         return 0
       end
       error.puts text
       2
+    end
+
+    # -- prompt --
+
+    # As the user's prompt goes to the agent: a new handle, when the
+    # session's project changed (`follow_project`), and with `mail`
+    # (`mail_root`) the receipts (`Mail::Notices`), added to its context.
+    # Receipts never keep the agent going on their own, so they wait for
+    # the next turn.
+    def self.prompt(bus : Rest, project_dir : String, agent : String, output : IO,
+                    mail : String? = nil, session : String? = nil) : Int32
+      moved = begin
+        follow_project(bus, AgentConfig.load(project_dir), session)
+      rescue AgentConfig::Error
+        nil
+      end
+      text = [moved, mail.try { |m| Mail::Notices.collect("prompt", m, session).presence }].compact.join("\n")
+      if text.empty?
+        output.puts "{}" if agent == "codex"
+        return 0
+      end
+      emit_context(output, "UserPromptSubmit", text.chomp)
+      0
+    end
+
+    # -- the session's handle --
+
+    # When this session's project has a handle other than the one it
+    # registered, as when it started below a folder that had no `.ai/`
+    # yet and so registered an enclosing project's: registers the
+    # project's own handle, under its owner token and key (made if need
+    # be, as at session start), and returns what to tell the agent. Once
+    # per change; nil when nothing changed, the session registered
+    # nothing, or the bus can't be reached (tried again next time).
+    def self.follow_project(bus : Rest, cfg : AgentConfig, session : String?) : String?
+      file = handle_file(session) || return nil
+      old = File.exists?(file) ? File.read(file).strip : return nil
+      return nil if old.empty? || old == cfg.handle
+      bus.key = cfg.key!
+      status, body = bus.post("/register", {
+        address:     cfg.handle,
+        kind:        "agent",
+        description: cfg.description,
+        owner_token: cfg.owner_token!,
+      })
+      return nil unless status && body
+      remember_handle(session, cfg.handle)
+      case status
+      when 200
+        "This session's project is now #{cfg.project_dir}, whose handle is #{cfg.handle}, so the hook " \
+        "registered it: you are #{cfg.handle} on the Arcana bus now, not #{old}. " \
+        "Send with from: \"#{cfg.handle}\"."
+      when 409 then held_text(cfg, body)
+      else
+        "Arcana: this session's project is now #{cfg.project_dir}, and registering its handle " \
+        "#{cfg.handle} failed: #{body["error"]?.try(&.as_s?) || "status #{status}"}"
+      end
+    rescue ex : File::Error | AgentConfig::Error
+      nil
+    end
+
+    # The handle this session registered, kept in
+    # `$XDG_RUNTIME_DIR/arcana-hook/<session id>`.
+    private def self.remember_handle(session : String?, handle : String) : Nil
+      if file = handle_file(session)
+        File.write(file, "#{handle}\n")
+      end
+    rescue File::Error
+    end
+
+    private def self.handle_file(session : String?) : String?
+      return nil unless session && !session.empty?
+      dir = File.join(ENV["XDG_RUNTIME_DIR"]?.presence || Dir.tempdir, "arcana-hook")
+      Dir.mkdir_p(dir, 0o700)
+      File.join(dir, session)
+    rescue File::Error
+      nil
     end
 
     def self.mail_flag(handle : String) : String
@@ -175,7 +311,11 @@ module Arcana
 
     # -- session-end --
 
-    def self.session_end(bus : Rest, project_dir : String, payload : JSON::Any) : Int32
+    def self.session_end(bus : Rest, project_dir : String, payload : JSON::Any, mail : String? = nil,
+                         session : String? = nil) : Int32
+      # With `mail` (`mail_root`), what's left in the outbox goes first
+      Mail::Notices.collect("session-end", mail, nil) if mail
+      handle_file(session).try { |f| File.delete?(f) }
       # /clear ends the session and starts a new one right away; leave
       # live mail live.
       return 0 if payload["reason"]?.try(&.as_s?) == "clear"
@@ -186,6 +326,27 @@ module Arcana
       bus.post("/presence", {address: cfg.handle, owner_token: cfg.owner_token, online: false})
       File.delete(mail_flag(cfg.handle)) if File.exists?(mail_flag(cfg.handle))
       0
+    end
+
+    # Mail from agents waiting on the bus for the project (not service
+    # replies or topic notices, which an agent may be waiting to take
+    # itself) is written into its `.ai/mail/inbox/` as inbox files, one at
+    # a time, so whatever brought a message, the agent meets it in the
+    # inbox. Returns the paths written.
+    def self.drain_mail(bus : Rest, cfg : AgentConfig) : Array(String)
+      inbox = File.join(cfg.project_dir, ".ai", "mail", "inbox")
+      return [] of String unless Dir.exists?(inbox)
+      status, body = bus.post("/inbox", {address: cfg.handle})
+      list = (status == 200 && body) ? body.as_a? : nil
+      return [] of String unless list
+      list.compact_map do |meta|
+        from = meta["from"]?.try(&.as_s?)
+        id = meta["correlation_id"]?.try(&.as_s?)
+        next unless from && id && from.starts_with?('@')
+        s, got = bus.post("/receive", {address: cfg.handle, id: id})
+        env = (s == 200 && got) ? got.as_a?.try(&.first?) : nil
+        write_note(inbox, env) if env
+      end
     end
 
     # Move unread mail into `.ai/mail/inbox/`, one note per message (see the

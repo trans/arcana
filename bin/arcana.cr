@@ -20,6 +20,9 @@ when "setup", "init"
 when "hook"
   # Session hooks for Claude Code and Codex (installed by `arcana setup`).
   exit Arcana::Hook.run(ARGV)
+when "mail"
+  # Mail between projects, where Arcana is the carrier (git config ai.carrier).
+  exit Arcana::Mail::Command.run(ARGV)
 when "version", "--version", "-v"
   puts "Arcana v#{Arcana::VERSION}"
   exit 0
@@ -32,7 +35,8 @@ when "help", "--help", "-h"
   Commands:
     serve   Start the Arcana server (default)
     setup   User/machine setup — install hooks + allow-rules + MCP registration
-    hook    Run a session hook: hook <session-start|stop|session-end> [--agent claude|codex]
+    hook    Run a session hook: hook <session-start|stop|prompt|session-end> [--agent claude|codex]
+    mail    Mail between projects, where Arcana is the carrier: mail help
     version Show version
 
   Options:

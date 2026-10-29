@@ -506,6 +506,38 @@ server.start  # blocking
 - **REST** `POST /thaw` — thaw a frozen message (or all)
 - **REST** `POST /frozen` — list frozen messages
 
+## Mail between projects
+
+Projects with a `.ai/` folder ([dot-ai](https://github.com/trans/dot-ai))
+send each other mail by writing it into `.ai/mail/outbox/`, and post to
+topics the same way. Whatever moves it between projects is the
+machine's mail carrier, chosen in git config:
+
+```
+git config --global ai.carrier arcana   # Arcana carries the mail
+git config --global ai.carrier local    # dot-ai-mail does (the default)
+```
+
+Both carriers keep to the same files and locks (dot-ai's spec, "The
+carrier's files"), so changing carriers moves nothing, and dot-ai's test
+suite runs against both (`CARRIER=arcana just test` in dot-ai).
+
+Where Arcana is the carrier:
+
+- `arcana mail deliver | check | topic | read | find` does what
+  dot-ai-mail's commands do, printing the same lines.
+- The session hooks (`arcana setup` installs them) deliver the outbox and
+  tell the agent of new mail, new posts in the topics its project
+  follows, and read receipts, as dot-ai's hooks do.
+- Mail for an address no project on this machine has goes over the bus,
+  to an agent registered there, signed with the project's key.
+
+Under any other carrier Arcana stays out of mail: its hooks say nothing
+of the inbox, and the MCP bridge refuses `arcana_deliver` to a project on
+this machine and `arcana_publish` to a `#topic`, pointing to the outbox.
+Services, and agents found only on the bus, are reached the same as
+ever.
+
 ## MCP Bridge
 
 Connects Claude Code (or any MCP client) to the Arcana bus via stdio:
@@ -527,8 +559,8 @@ Connects Claude Code (or any MCP client) to the Arcana bus via stdio:
 | Tool | Description |
 |---|---|
 | `arcana_directory` | Search/filter/lookup directory listings (agents, services, topics) |
-| `arcana_deliver` | Unified send with ordering (auto/sync/async). Mail from the project's handle to an agent gets its dot-ai message id (`id` in the result), carried with it; in a project with `.ai/mail/sent/`, it's also filed there as the sender's copy, with `Id:`, named in `sent_file`. `re` names what a message answers: a message's id, or `#topic:<seq>` |
-| `arcana_publish` | Post to a topic, optionally with `re` |
+| `arcana_deliver` | Unified send with ordering (auto/sync/async). Mail from the project's handle to an agent gets its dot-ai message id (`id` in the result), carried with it; in a project with `.ai/mail/sent/`, it's also filed there as the sender's copy, with `Id:`, named in `sent_file`. `re` names what a message answers: a message's id, or `#topic:<seq>`. Refused for a project on this machine unless Arcana is its mail carrier (see Mail between projects) |
+| `arcana_publish` | Post to a topic, optionally with `re`. Refused for a topic kept as files on this machine, and for every `#topic` unless Arcana is the mail carrier |
 | `arcana_register` | Register/unregister/busy/idle, and subscribe/unsubscribe/subscriptions for topics |
 | `arcana_inbox` | Non-destructive message listing, or a topic's posts after a number |
 | `arcana_receive` | Consume messages (selective by correlation id, with timeout). In a project with `.ai/mail/inbox/` (dot-ai), mail from agents to the project's handle is also written there, with the `Id:` its sender carried (or its correlation id's first 8) and any `Re:`, and each message names its file in `inbox_file` |

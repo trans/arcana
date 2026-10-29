@@ -25,7 +25,7 @@ describe Arcana::Help do
 
   describe ".topics" do
     it "lists the four canonical topics" do
-      Arcana::Help.topics.should eq(["workflow", "addressing", "discovery", "topics", "errors"])
+      Arcana::Help.topics.should eq(["workflow", "addressing", "discovery", "topics", "mail", "errors"])
     end
   end
 end

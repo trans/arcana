@@ -81,8 +81,12 @@ echo ""
 # project's .ai/config.yml (the nearest .ai/ above the session; without
 # one, @<directory name>), the
 # registration carries the project's owner token, session start tells the
-# agent who it is on the bus, and session end moves unread mail into
-# .ai/mail/inbox/ and marks the handle offline instead of unregistering it.
+# agent who it is on the bus, each prompt follows the session to its
+# project's handle should that change, and session end moves unread mail
+# into .ai/mail/inbox/ and marks the handle offline instead of
+# unregistering it. Where Arcana is the machine's mail carrier (git
+# config ai.carrier arcana), they also deliver the outbox and tell of
+# mail, as dot-ai's hooks do elsewhere.
 
 # write_hook <path> <event> <agent> <comment>
 write_hook() {
@@ -98,40 +102,45 @@ HOOK
 
 mkdir -p "$HOOKS_DIR"
 write_hook "$HOOKS_DIR/arcana-register.sh"   session-start claude "SessionStart hook: register this project's agent on the Arcana bus."
+write_hook "$HOOKS_DIR/arcana-prompt.sh"     prompt        claude "UserPromptSubmit hook: follow the session to a new handle; Arcana-carried mail's receipts."
 write_hook "$HOOKS_DIR/arcana-mail.sh"       stop          claude "Stop hook: ask the agent to read waiting Arcana mail before it stops."
-write_hook "$HOOKS_DIR/arcana-unregister.sh" session-end   claude "SessionEnd hook: move unread mail to .ai/inbox/, mark the handle offline."
+write_hook "$HOOKS_DIR/arcana-unregister.sh" session-end   claude "SessionEnd hook: move unread mail to .ai/mail/inbox/, mark the handle offline."
 echo "  Hooks installed → $HOOKS_DIR/arcana-*.sh"
 
 # --- 2. Merge hooks + permission allow-rules into settings.json ---
+#
+# Each hook entry is added unless one already runs its script, and
+# mcp__arcana__* is added to permissions.allow unless it's there: the
+# user's other hooks and allow rules stay as they are.
 
 mkdir -p "$CLAUDE_DIR"
 
 # Pre-approve every mcp__arcana__* tool call. Without this, sub-agents
 # spawned by AIX (or any headless Claude Code launch) freeze on the first
 # arcana tool call waiting for a permission click that never comes.
-SETTINGS_ADD='{
-  "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/arcana-register.sh" }] }],
-    "Stop":         [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/arcana-mail.sh"     }] }],
-    "SessionEnd":   [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/arcana-unregister.sh" }] }]
-  },
-  "permissions": {
-    "allow": ["mcp__arcana__*"]
-  }
-}'
-
-if [ -f "$SETTINGS" ]; then
-  # Merge into existing settings. `*` is jq's recursive merge — preserves
-  # sibling keys, replaces on conflict at leaves. permissions.allow is
-  # replaced wholesale rather than appended; if the user has custom allow
-  # rules already, they need to add mcp__arcana__* themselves. (The `*`
-  # merge doesn't concat arrays. Live with it — this is user-scoped.)
-  MERGED=$(jq -s '.[0] * .[1]' "$SETTINGS" <(echo "$SETTINGS_ADD"))
+EXISTING='{}'
+[ -f "$SETTINGS" ] && EXISTING=$(cat "$SETTINGS")
+MERGED=$(echo "$EXISTING" | jq '
+  def ensure(ev; cmd):
+    .hooks[ev] = ((.hooks[ev] // [])
+      | if any(.[]?; any(.hooks[]?; .command == cmd)) then .
+        else . + [{hooks: [{type: "command", command: cmd}]}] end);
+  .hooks //= {}
+  | ensure("SessionStart"; "~/.claude/hooks/arcana-register.sh")
+  | ensure("UserPromptSubmit"; "~/.claude/hooks/arcana-prompt.sh")
+  | ensure("Stop"; "~/.claude/hooks/arcana-mail.sh")
+  | ensure("SessionEnd"; "~/.claude/hooks/arcana-unregister.sh")
+  | .permissions.allow = ((.permissions.allow // [])
+      | if any(.[]; . == "mcp__arcana__*") then . else . + ["mcp__arcana__*"] end)
+')
+if [ ! -f "$SETTINGS" ]; then
+  echo "$MERGED" > "$SETTINGS"
+  echo "  Settings created → $SETTINGS"
+elif [ "$(jq -cS . "$SETTINGS")" != "$(echo "$MERGED" | jq -cS .)" ]; then
   echo "$MERGED" > "$SETTINGS"
   echo "  Settings merged → $SETTINGS"
 else
-  echo "$SETTINGS_ADD" | jq . > "$SETTINGS"
-  echo "  Settings created → $SETTINGS"
+  echo "  Settings → $SETTINGS (already lists the hooks)"
 fi
 
 # --- 2b. Codex hooks (only when Codex is installed) ---
@@ -145,8 +154,9 @@ if [ -d "$CODEX_DIR" ]; then
   CODEX_HOOKS="$CODEX_DIR/hooks"
   mkdir -p "$CODEX_HOOKS"
   write_hook "$CODEX_HOOKS/arcana-register.sh"   session-start codex "Codex SessionStart hook: register this project's agent on the Arcana bus."
+  write_hook "$CODEX_HOOKS/arcana-prompt.sh"     prompt        codex "Codex UserPromptSubmit hook: follow the session to a new handle; Arcana-carried mail's receipts."
   write_hook "$CODEX_HOOKS/arcana-mail.sh"       stop          codex "Codex Stop hook: continue once when this project's Arcana inbox has mail."
-  write_hook "$CODEX_HOOKS/arcana-unregister.sh" session-end   codex "Codex SessionEnd hook: move unread mail to .ai/inbox/, mark the handle offline."
+  write_hook "$CODEX_HOOKS/arcana-unregister.sh" session-end   codex "Codex SessionEnd hook: move unread mail to .ai/mail/inbox/, mark the handle offline."
 
   CODEX_JSON="$CODEX_DIR/hooks.json"
   [ -f "$CODEX_JSON" ] || echo '{"hooks":{}}' > "$CODEX_JSON"
@@ -157,9 +167,10 @@ if [ -d "$CODEX_DIR" ]; then
           | if any(.[]?; any(.hooks[]?; .command == $cmd)) then . else . + [entry] end);
     .hooks //= {}
     | ensure("SessionStart"; {matcher: "startup|resume|clear",
-        hooks: [{type: "command", command: "\($dir)/arcana-register.sh", timeout: 3, statusMessage: "Registering with Arcana"}]})
-    | ensure("Stop"; {hooks: [{type: "command", command: "\($dir)/arcana-mail.sh", timeout: 3}]})
-    | ensure("SessionEnd"; {hooks: [{type: "command", command: "\($dir)/arcana-unregister.sh", timeout: 3}]})
+        hooks: [{type: "command", command: "\($dir)/arcana-register.sh", timeout: 10, statusMessage: "Registering with Arcana"}]})
+    | ensure("UserPromptSubmit"; {hooks: [{type: "command", command: "\($dir)/arcana-prompt.sh", timeout: 10}]})
+    | ensure("Stop"; {hooks: [{type: "command", command: "\($dir)/arcana-mail.sh", timeout: 10}]})
+    | ensure("SessionEnd"; {hooks: [{type: "command", command: "\($dir)/arcana-unregister.sh", timeout: 10}]})
   ' "$CODEX_JSON")
   if [ "$(jq -cS . "$CODEX_JSON")" != "$(echo "$MERGED" | jq -cS .)" ]; then
     echo "$MERGED" > "$CODEX_JSON"
