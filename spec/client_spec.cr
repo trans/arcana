@@ -261,4 +261,32 @@ describe "Arcana::Client joining a held address" do
       server.stop
     end
   end
+
+  # A long-idle bus once lost its providers' listings, and each request
+  # to them waited out the sender's 45s timeout with no word why.
+  it "gets an error at once for a request to an address with no mailbox" do
+    bus = Arcana::Bus.new
+    dir = Arcana::Directory.new
+    bus.directory = dir
+    server = Arcana::Server.new(bus, dir, port: 14240)
+    server.start_in_background
+
+    client = Arcana::Client.new(url: "ws://127.0.0.1:14240/bus", address: "game")
+
+    begin
+      spawn { client.connect }
+      sleep 100.milliseconds
+
+      started = Time.instant
+      reply = client.request(Arcana::Envelope.new(from: "game", to: "anthropic",
+        payload: JSON.parse(%({"tool":"chat"}))), timeout: 5.seconds).not_nil!
+      (Time.instant - started).should be < 1.second
+      Arcana::Protocol.error?(reply.payload).should be_true
+      Arcana::Protocol.message(reply.payload).should eq("No mailbox for address: anthropic")
+      reply.from.should eq("anthropic")
+    ensure
+      client.close
+      server.stop
+    end
+  end
 end

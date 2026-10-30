@@ -1164,7 +1164,7 @@ module Arcana
             when "send"
               envelope = parse_envelope(parsed)
               envelope.verified = Server.proves?(@directory, envelope.from, proven_key, proven_token)
-              @bus.send?(envelope)
+              bounce(envelope) unless @bus.send?(envelope)
             when "publish"
               topic = parsed.str("topic")
               envelope = parse_envelope(parsed)
@@ -1200,6 +1200,18 @@ module Arcana
         end
 
         ws.run
+      end
+
+      # A message sent over a socket that the bus couldn't take (no mailbox
+      # for its address, or a full one) goes back to its sender as an
+      # error reply under its correlation_id, so a request fails at once
+      # instead of waiting out its timeout, as the REST deliver's error
+      # does. Not a reply whose request gave up (its `_reply:` mailbox is
+      # gone), nor an error itself.
+      private def bounce(envelope : Envelope) : Nil
+        return if envelope.from.empty? || envelope.to.starts_with?("_reply:") || Protocol.error?(envelope.payload)
+        why = @bus.has_mailbox?(envelope.to) ? "#{envelope.to}'s mailbox is full" : "No mailbox for address: #{envelope.to}"
+        @bus.send?(envelope.reply(from: envelope.to, payload: Protocol.error(why, "undeliverable")))
       end
 
       private def parse_envelope(parsed : JSON::Any) : Envelope
