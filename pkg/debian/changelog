@@ -1,3 +1,18 @@
+arcana (0.38.1-1) unstable; urgency=medium
+
+  * Services with bare names (a Toolset's: anthropic, openai, arcana,
+    runware) are never pruned: the hourly sweep took them for agents and
+    removed them after a week without traffic, so a long-idle bus lost
+    its providers until restarted. Auto ordering now waits for their
+    replies, as for any service, where it sent fire-and-forget
+    (arcana-core 0.21.3).
+  * A message sent over the WebSocket to an address with no mailbox, or
+    a full one, comes back to its sender as an error reply under its
+    correlation_id, so a request fails at once instead of waiting out
+    its timeout.
+
+ -- trans <transfire@gmail.com>  Fri, 30 Oct 2026 19:00:00 +0000
+
 arcana (0.38.0-1) unstable; urgency=medium
 
   * Arcana can carry a machine's mail between projects, as dot-ai-mail
@@ -20,16 +35,6 @@ arcana (0.38.0-1) unstable; urgency=medium
   * `arcana setup` adds the prompt hook, and no longer replaces other
     hooks or permission rules in ~/.claude/settings.json: it adds its
     entries only where they're missing.
-  * Services with bare names (a Toolset's: anthropic, openai, arcana,
-    runware) are never pruned: the hourly sweep took them for agents and
-    removed them after a week without traffic, so a long-idle bus lost
-    its providers until restarted. Auto ordering now waits for their
-    replies, as for any service, where it sent fire-and-forget
-    (arcana-core 0.21.3).
-  * A message sent over the WebSocket to an address with no mailbox, or
-    a full one, comes back to its sender as an error reply under its
-    correlation_id, so a request fails at once instead of waiting out
-    its timeout.
 
  -- trans <transfire@gmail.com>  Thu, 29 Oct 2026 20:00:00 +0000
 
