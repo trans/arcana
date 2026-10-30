@@ -17,7 +17,8 @@ module Arcana
   # - `prompt`: as the user's prompt goes to the agent.
   # - At `stop` and `prompt`, a session whose project now has another
   #   handle than the one it registered (a new `.ai/` appeared above where
-  #   it started) registers the new one and tells the agent
+  #   it started), or that registered none (the bus was down at session
+  #   start, say), registers the project's handle and tells the agent
   #   (`follow_project`).
   # - `session-end`: moves unread mail into `.ai/mail/inbox/` as notes (when
   #   the project has `.ai/`), then marks the handle offline. The handle stays
@@ -25,7 +26,7 @@ module Arcana
   #
   # Mail between projects is the machine's carrier's (git config's
   # `ai.carrier`, see `Mail`). Where Arcana is the carrier, the hooks also
-  # do what dot-ai-mail's do (`Mail::Notices`): deliver the outbox, and
+  # do what dot-ai's do (`Mail::Notices`): deliver the outbox, and
   # tell of the inbox, followed topics' new posts and receipts. Under
   # either carrier, mail from agents still waiting on the bus is written
   # into the project's inbox as inbox files (`drain_mail`), so the agent
@@ -185,7 +186,7 @@ module Arcana
     #
     # A project with `.ai/mail/inbox/` has its bus mail written there
     # instead (`drain_mail`). Then, with `mail` (`mail_root`), Arcana tells
-    # what dot-ai-mail's Stop hook would (`Mail::Notices`), and otherwise
+    # what dot-ai's Stop hook would (`Mail::Notices`), and otherwise
     # nothing: the machine's carrier tells of the inbox.
     def self.stop(bus : Rest, project_dir : String, agent : String, payload : JSON::Any,
                   output : IO, error : IO, mail : String? = nil, session : String? = nil) : Int32
@@ -254,15 +255,16 @@ module Arcana
 
     # When this session's project has a handle other than the one it
     # registered, as when it started below a folder that had no `.ai/`
-    # yet and so registered an enclosing project's: registers the
-    # project's own handle, under its owner token and key (made if need
-    # be, as at session start), and returns what to tell the agent. Once
-    # per change; nil when nothing changed, the session registered
-    # nothing, or the bus can't be reached (tried again next time).
+    # yet and so registered an enclosing project's, or the session
+    # registered none (the bus was down at its start, or its config
+    # couldn't be read): registers the project's own handle, under its
+    # owner token and key (made if need be, as at session start), and
+    # returns what to tell the agent. Once per change; nil when nothing
+    # changed or the bus can't be reached (tried again next time).
     def self.follow_project(bus : Rest, cfg : AgentConfig, session : String?) : String?
       file = handle_file(session) || return nil
-      old = File.exists?(file) ? File.read(file).strip : return nil
-      return nil if old.empty? || old == cfg.handle
+      old = File.exists?(file) ? File.read(file).strip.presence : nil
+      return nil if old == cfg.handle
       bus.key = cfg.key!
       status, body = bus.post("/register", {
         address:     cfg.handle,
@@ -274,9 +276,14 @@ module Arcana
       remember_handle(session, cfg.handle)
       case status
       when 200
-        "This session's project is now #{cfg.project_dir}, whose handle is #{cfg.handle}, so the hook " \
-        "registered it: you are #{cfg.handle} on the Arcana bus now, not #{old}. " \
-        "Send with from: \"#{cfg.handle}\"."
+        if old
+          "This session's project is now #{cfg.project_dir}, whose handle is #{cfg.handle}, so the hook " \
+          "registered it: you are #{cfg.handle} on the Arcana bus now, not #{old}. " \
+          "Send with from: \"#{cfg.handle}\"."
+        else
+          "You are #{cfg.handle} on the Arcana bus now: the hook registered this session's project, " \
+          "#{cfg.project_dir}, which it couldn't when the session started. Send with from: \"#{cfg.handle}\"."
+        end
       when 409 then held_text(cfg, body)
       else
         "Arcana: this session's project is now #{cfg.project_dir}, and registering its handle " \

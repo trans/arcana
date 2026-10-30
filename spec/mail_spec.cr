@@ -2,22 +2,28 @@ require "./spec_helper"
 require "file_utils"
 
 # Arcana as a machine's mail carrier. dot.ai's tests check what it shares
-# with dot-ai-mail (`CARRIER=arcana just test` there); these check what
-# only Arcana does: mail beyond this machine's projects over the bus, the
-# bridge staying out of mail under another carrier, and a session
-# following its project to a new handle.
+# with dot-ai (`CARRIER=arcana just test` there); these check what only
+# Arcana does: mail beyond this machine's projects over the bus, the
+# bridge staying out of mail under another carrier, naming dot-ai's
+# commands only where it's installed, and a session following its
+# project to a new handle.
 
-# A machine: git config with `ai.path` and the carrier, projects under it.
+# A machine: git config with `ai.path` and the carrier, projects under it,
+# and no dot-ai (`dot_ai` adds one).
 private def machine(carrier : String?, &)
   root = File.tempname("arcana-mail-spec")
   projects = File.join(root, "projects")
   Dir.mkdir_p(projects)
   config = File.join(root, "gitconfig")
   File.write(config, "[ai]\n\tpath = #{projects}\n#{carrier ? "\tcarrier = #{carrier}\n" : ""}")
-  saved = {"GIT_CONFIG_GLOBAL", "XDG_RUNTIME_DIR", "XDG_STATE_HOME", "CLAUDE_PROJECT_DIR", "ARCANA_URL"}.to_h { |k| {k, ENV[k]?} }
+  saved = {"GIT_CONFIG_GLOBAL", "XDG_RUNTIME_DIR", "XDG_STATE_HOME", "CLAUDE_PROJECT_DIR", "ARCANA_URL",
+           "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PATH"}.to_h { |k| {k, ENV[k]?} }
   ENV["GIT_CONFIG_GLOBAL"] = config
   ENV["XDG_RUNTIME_DIR"] = File.join(root, "run")
   ENV["XDG_STATE_HOME"] = File.join(root, "state")
+  ENV["CLAUDE_CONFIG_DIR"] = File.join(root, "claude")
+  ENV["CODEX_HOME"] = File.join(root, "codex")
+  ENV["PATH"] = (ENV["PATH"]? || "").split(':').reject { |d| File.exists?(File.join(d, "dot-ai")) }.join(':')
   ENV.delete("CLAUDE_PROJECT_DIR")
   ENV.delete("ARCANA_URL")
   Dir.mkdir_p(File.join(root, "run"))
@@ -27,6 +33,14 @@ private def machine(carrier : String?, &)
     saved.each { |k, v| v ? (ENV[k] = v) : ENV.delete(k) }
     FileUtils.rm_rf(root)
   end
+end
+
+# dot-ai's command as the plugin installs it, under `home`'s cache
+private def dot_ai(projects : String, home : String, version : String, script : String = "dot-ai") : String
+  dir = File.join(File.dirname(projects), home, "plugins", "cache", "dot-ai", "dot-ai", version, "skills", "dot-ai", "scripts")
+  Dir.mkdir_p(dir)
+  File.write(File.join(dir, script), "echo dot-ai #{version}\n")
+  File.join(dir, script)
 end
 
 private def mail_project(projects : String, name : String) : String
@@ -122,14 +136,62 @@ describe Arcana::Mail do
   end
 end
 
+describe "Arcana::Mail.dot_ai" do
+  it "is dot-ai on the PATH, else the newest plugin copy for Claude Code or Codex, else none" do
+    machine(nil) do |projects|
+      Arcana::Mail.dot_ai.should be_nil
+      Arcana::Mail.dot_ai?.should be_false
+
+      # dot-ai-mail alone (before 0.5) is dot-ai, but not one to name
+      dot_ai(projects, "claude", "0.4.2", "dot-ai-mail")
+      Arcana::Mail.dot_ai.should be_nil
+      Arcana::Mail.dot_ai?.should be_true
+
+      dot_ai(projects, "claude", "0.9.0")
+      newest = dot_ai(projects, "codex", "0.10.0")
+      Arcana::Mail.dot_ai.should eq(%(sh "#{newest}"))
+
+      bin = File.join(File.dirname(projects), "bin")
+      Dir.mkdir_p(bin)
+      File.write(File.join(bin, "dot-ai"), "#!/bin/sh\n")
+      File.chmod(File.join(bin, "dot-ai"), 0o755)
+      ENV["PATH"] = "#{bin}:#{ENV["PATH"]}"
+      Arcana::Mail.dot_ai.should eq("dot-ai")
+    end
+  end
+
+  it "names dot-ai's commands in what the hooks say where it's installed, and Arcana's where it isn't" do
+    machine("arcana") do |projects|
+      alpha = mail_project(projects, "alpha")
+      Dir.mkdir_p(File.join(projects, ".ai", "topics"))
+      outbox = File.join(alpha, ".ai", "mail", "outbox")
+      inbox = File.join(alpha, ".ai", "mail", "inbox")
+      File.write(File.join(inbox, "20261030-120000Z-@beta--hi-0123abcd.md"), "From: @beta\n\nhi\n")
+
+      File.write(File.join(outbox, "20261030-120000Z-#nope--x.md"), "x\n")
+      said = Arcana::Mail::Notices.collect("session-start", alpha, "s1")
+      said.should contain("there's no topic #nope (arcana mail topic makes one)")
+      said.should contain("once each is handled, move it to .ai/mail/received/")
+
+      script = dot_ai(projects, "claude", "0.5.1")
+      said = Arcana::Mail::Notices.collect("session-start", alpha, "s1")
+      said.should contain("there's no topic #nope (dot-ai mail topic makes one)")
+      said.should contain(%(as the dot-ai skill says (Processing the inbox), filing each with: sh "#{script}" mail done NAME))
+    end
+  end
+end
+
 describe "Arcana::MCP under a carrier" do
-  it "refuses mail to a project here and posts to topics where dot-ai-mail carries mail" do
+  it "refuses mail to a project here and posts to topics where dot-ai carries mail" do
     machine(nil) do |projects|
       alpha = mail_project(projects, "alpha")
       mail_project(projects, "beta")
+      script = dot_ai(projects, "claude", "0.5.1")
       mcp = Arcana::MCP.new(base_url: "http://127.0.0.1:9", project_dir: alpha)
       tool(mcp, "arcana_deliver", %({"to":"@beta","subject":"hi","payload":{"text":"hello"}}))["error"].as_s
-        .should start_with("Not sent: @beta is a project on this machine, and this machine's mail carrier is local")
+        .should eq("Not sent: @beta is a project on this machine, and this machine's mail carrier is local " \
+                   "(git config ai.carrier), so mail to it goes through your project's outbox: send it with " \
+                   "sh \"#{script}\" mail send @beta TOPIC, the message on standard input, as the dot-ai skill says (Sending).")
       tool(mcp, "arcana_publish", %({"topic":"#news","payload":{"text":"hello"}}))["error"].as_s
         .should start_with("Not posted: this machine's mail carrier is local")
       # Agents found only on the bus, and services, still go (here, to a bus that's down)
@@ -137,6 +199,18 @@ describe "Arcana::MCP under a carrier" do
         .should_not start_with("Not sent")
       tool(mcp, "arcana_deliver", %({"to":"openai","payload":{"tool":"help"}}))["error"].as_s
         .should_not start_with("Not sent")
+    end
+  end
+
+  it "carries all mail itself on a machine without dot-ai, whatever the carrier says" do
+    machine(nil) do |projects|
+      alpha = mail_project(projects, "alpha")
+      mail_project(projects, "beta")
+      mcp = Arcana::MCP.new(base_url: "http://127.0.0.1:9", project_dir: alpha)
+      tool(mcp, "arcana_deliver", %({"to":"@beta","subject":"hi","payload":{"text":"hello"}}))["error"].as_s
+        .should_not start_with("Not sent")
+      tool(mcp, "arcana_publish", %({"topic":"#news","payload":{"text":"hello"}}))["error"].as_s
+        .should_not start_with("Not posted")
     end
   end
 
@@ -185,6 +259,26 @@ describe "Arcana::Hook following a session's project" do
         # Once: not at the next prompt, nor at Stop
         run.call("prompt")[1].should eq("")
         run.call("stop")[0].should eq(0)
+      end
+    end
+  end
+
+  it "registers the handle at the next prompt when the bus was down at session start" do
+    machine(nil) do |projects|
+      alpha = mail_project(projects, "alpha")
+      run = ->(event : String, port : Int32) do
+        input = IO::Memory.new({session_id: "s2", cwd: alpha}.to_json)
+        output = IO::Memory.new
+        Arcana::Hook.run([event, "--agent", "claude"], input, output, IO::Memory.new, base_url: "http://127.0.0.1:#{port}")
+        output.to_s
+      end
+
+      run.call("session-start", 9).should eq("")
+      bus_on(14973) do |_, directory|
+        context = JSON.parse(run.call("prompt", 14973))["hookSpecificOutput"]["additionalContext"].as_s
+        context.should start_with("You are @alpha on the Arcana bus now: the hook registered this session's project")
+        directory.lookup("@alpha").should_not be_nil
+        run.call("prompt", 14973).should eq("") # once
       end
     end
   end

@@ -3,8 +3,9 @@ require "./mail"
 
 module Arcana
   module Mail
-    # `arcana mail <command>`: dot-ai-mail's commands, for a machine whose
-    # carrier is Arcana. Each prints what dot-ai-mail's does.
+    # `arcana mail <command>`: the carrier's commands of `dot-ai mail`, for
+    # a machine whose carrier is Arcana (dot-ai hands them over). Each
+    # prints what dot-ai's does.
     module Command
       USAGE = <<-USAGE
         arcana mail: deliver .ai/ mail between the projects on this machine,
@@ -184,7 +185,8 @@ module Arcana
     end
 
     # What the session hooks tell the agent when Arcana is the carrier, as
-    # dot-ai-mail's hooks do: at session start everything, at Stop only
+    # dot-ai's hooks do, naming dot-ai's commands where it's installed
+    # (`Mail.dot_ai`) and Arcana's own where it isn't: at session start everything, at Stop only
     # what this session hasn't been told of, and at each prompt only the
     # receipts. What a session was told of is kept in
     # `$XDG_RUNTIME_DIR/arcana-mail/<session id>`, so a message the agent
@@ -231,7 +233,13 @@ module Arcana
           what = start ? "#{count(fresh.size, "message")} waiting" : count(fresh.size, "new message")
           say << "You have mail: " << what << " in .ai/mail/inbox/:\n"
           fresh.each { |n| say << "  " << n << "\n" }
-          say << "Process " << (fresh.size == 1 ? "it" : "them, oldest first,") << " as the dot-ai skill says (Processing the inbox).\n"
+          if d = Mail.dot_ai
+            say << "Process " << (fresh.size == 1 ? "it" : "them, oldest first,") <<
+              " as the dot-ai skill says (Processing the inbox), filing each with: " << d << " mail done NAME\n"
+          else
+            say << "Read " << (fresh.size == 1 ? "it" : "them, oldest first") << "; once each is handled, " \
+              "move it to .ai/mail/received/ and commit it with the notes it went into.\n"
+          end
         end
 
         # New posts in the topics the project follows, each told of once
@@ -255,7 +263,11 @@ module Arcana
         unless posts.empty?
           say << "New posts in the topics this project follows:\n"
           posts.each { |p| say << p << "\n" }
-          say << "Read them with: arcana mail read '#topic' (the dot-ai skill: Topics).\n"
+          if d = Mail.dot_ai
+            say << "Read them with: " << d << " mail read '#topic' (the dot-ai skill: Topics).\n"
+          else
+            say << "Read them with: arcana mail read '#topic'.\n"
+          end
         end
 
         # The receipts too, at session start or when Stop has something to

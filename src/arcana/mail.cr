@@ -5,16 +5,20 @@ require "./agent_config"
 
 module Arcana
   # Arcana as a machine's mail carrier (the dot-ai spec's Mail, in the
-  # user's `dot.ai` repository): what dot-ai-mail does, through the same
-  # files and locks (the spec's "The carrier's files"), so either can be
-  # the machine's carrier and a change between them moves nothing.
+  # user's `dot.ai` repository): what dot-ai's local carrier does, through
+  # the same files and locks (the spec's "The carrier's files"), so either
+  # can be the machine's carrier and a change between them moves nothing.
+  # Agents keep using `dot-ai mail`, which hands the carrier's part to
+  # `arcana mail`.
   #
   # Which carrier a machine has is git config's `ai.carrier`: `arcana`
-  # makes Arcana the carrier; under any other (`local`, dot-ai-mail, the
+  # makes Arcana the carrier; under any other (`local`, dot-ai itself, the
   # default) Arcana stays out of mail. Each run reads it afresh.
   #
-  # What it prints matches dot-ai-mail line for line, so dot.ai's tests
-  # (`tests/dot-ai-mail.sh`, with `CARRIER=arcana`) check both carriers.
+  # What it prints matches dot-ai line for line, so dot.ai's tests
+  # (`tests/dot-ai.sh`, with `CARRIER=arcana`) check both carriers. Where it
+  # names a command, it names dot-ai's when dot-ai is installed (`dot_ai`),
+  # and its own otherwise: Arcana never needs dot-ai.
   #
   # Where it goes further: a message for an address no project on this
   # machine has goes over the Arcana bus (`bus_sender`), to an agent
@@ -62,6 +66,56 @@ module Arcana
 
     def self.ai_paths : Array(String)
       git_config("ai.path", all: true, path: true)
+    end
+
+    # -- dot-ai ---------------------------------------------------------------
+
+    # dot-ai's command, below a version of its Claude Code or Codex plugin,
+    # or below their home for a skill installed by hand.
+    DOT_AI_SCRIPT = File.join("skills", "dot-ai", "scripts", "dot-ai")
+
+    # Claude Code's and Codex's homes, where dot-ai is installed for them.
+    private def self.agent_homes : Array(String)
+      home = Path.home.to_s
+      [ENV["CLAUDE_CONFIG_DIR"]?.presence || File.join(home, ".claude"),
+       ENV["CODEX_HOME"]?.presence || File.join(home, ".codex")]
+    end
+
+    # How an agent runs dot-ai (0.5 or later), for what Arcana tells it:
+    # `dot-ai` when it's on the PATH (`dot-ai install`), else the newest
+    # copy the dot-ai plugin installed for Claude Code or Codex, or one
+    # installed by hand as a skill, run with `sh`. Nil when there's none,
+    # and Arcana names its own commands instead.
+    def self.dot_ai : String?
+      return "dot-ai" if Process.find_executable("dot-ai")
+      best = nil
+      newest = [] of Int32
+      agent_homes.each do |home|
+        cache = File.join(home, "plugins", "cache", "dot-ai", "dot-ai")
+        next unless Dir.exists?(cache)
+        Dir.each_child(cache) do |v|
+          next unless v.matches?(/\A\d+\.\d+\.\d+\z/)
+          script = File.join(cache, v, DOT_AI_SCRIPT)
+          version = v.split('.').map(&.to_i)
+          if File.file?(script) && (best.nil? || (version <=> newest) > 0)
+            best, newest = script, version
+          end
+        end
+      end
+      best ||= agent_homes.map { |h| File.join(h, DOT_AI_SCRIPT) }.find { |s| File.file?(s) }
+      best.try { |s| %(sh "#{s}") }
+    rescue File::Error
+      nil
+    end
+
+    # Whether dot-ai is installed at all, in any version: `dot_ai`, or an
+    # older one (dot-ai-mail) installed for Claude Code or Codex. Without
+    # it, nothing but Arcana carries mail between projects.
+    def self.dot_ai? : Bool
+      return true if dot_ai
+      agent_homes.any? do |h|
+        Dir.exists?(File.join(h, "plugins", "cache", "dot-ai", "dot-ai")) || Dir.exists?(File.join(h, "skills", "dot-ai"))
+      end
     end
 
     # -- Projects and addresses -----------------------------------------------
@@ -376,7 +430,7 @@ module Arcana
         end
         dest = File.join(home, to.lchop('#'))
         unless Dir.exists?(dest)
-          io.puts "left in the outbox: #{name}: there's no topic #{to} (arcana mail topic makes one)"
+          io.puts "left in the outbox: #{name}: there's no topic #{to} (#{dot_ai ? "dot-ai" : "arcana"} mail topic makes one)"
           return
         end
       else

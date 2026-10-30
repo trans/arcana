@@ -79,13 +79,14 @@ module Arcana
         MD
 
       "mail" => <<-MD,
-        **Mail between projects:** an agent in a project with `.ai/`
-        (dot-ai) sends mail to another project on this machine, and posts
-        to a topic, by writing it into its outbox, whatever carries it:
-        the machine's mail carrier (git config `ai.carrier`: `local`, the
-        default, is dot-ai-mail; `arcana` is Arcana) delivers it. Where the
-        carrier isn't Arcana, `arcana_deliver` to such a project and
-        `arcana_publish` to a `#topic` are refused. Services, and agents
+        **Mail between projects:** where dot-ai is installed, an agent in
+        a project with `.ai/` sends mail to another project on this
+        machine, and posts to a topic, with `dot-ai mail send`, whatever
+        carries it: the machine's mail carrier (git config `ai.carrier`:
+        `local`, the default, is dot-ai itself; `arcana` is Arcana)
+        delivers it. Where the carrier isn't Arcana, `arcana_deliver` to
+        such a project and `arcana_publish` to a `#topic` are refused.
+        Without dot-ai, these tools carry all mail. Services, and agents
         found only on the bus, are reached with these tools either way.
         MD
 

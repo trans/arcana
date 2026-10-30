@@ -448,29 +448,34 @@ module Arcana
     # Mail between the projects on this machine, and posts to its topics,
     # go through the sender's outbox, and the machine's carrier (git
     # config's `ai.carrier`, see `Mail`) takes them from there. Where
-    # that's dot-ai-mail, Arcana stays out of mail, so mail to a project
-    # here and a post to any topic are refused, saying where they go;
-    # where it's Arcana, only a post to a topic kept as files here.
-    # Calls to services, and mail to agents found only on the bus, go
-    # either way. Nil when the message may go.
+    # that's dot-ai, Arcana stays out of mail, so mail to a project here
+    # and a post to any topic are refused, saying where they go; where
+    # it's Arcana, only a post to a topic kept as files here. Calls to
+    # services, and mail to agents found only on the bus, go either way,
+    # and so does everything on a machine without dot-ai (`Mail.dot_ai?`),
+    # where nothing else would carry it. Nil when the message may go.
     private def not_ours(to : String) : String?
       here = @self_config.try(&.project_dir) || Dir.current
       carrier = Mail.carrier
+      ours = carrier == Mail::NAME
+      return nil unless ours || Mail.dot_ai?
+      d = Mail.dot_ai
       if to.starts_with?('#')
+        how = d ? "post it with #{d} mail send '#{to}' TOPIC, the message on standard input" : "write it into .ai/mail/outbox/ addressed to #{to}"
         home = Mail.topic_home(here)[0]
-        if carrier != Mail::NAME
+        if !ours
           {error: "Not posted: this machine's mail carrier is #{carrier} (git config ai.carrier), " \
                   "which keeps topics as files, so a post to #{to} goes through your project's outbox: " \
-                  "write it into .ai/mail/outbox/ addressed to #{to}, as the dot-ai skill says (Topics)."}.to_json
+                  "#{how}, as the dot-ai skill says (Topics)."}.to_json
         elsif home && Dir.exists?(File.join(home, to.lchop('#')))
           {error: "Not posted: #{to} is a topic kept as files on this machine, so a post to it goes " \
-                  "through your project's outbox: write it into .ai/mail/outbox/ addressed to #{to}, " \
-                  "as the dot-ai skill says (Topics)."}.to_json
+                  "through your project's outbox: #{how}, as the dot-ai skill says (Topics)."}.to_json
         end
-      elsif to.starts_with?('@') && carrier != Mail::NAME && Mail.scan(here).any? { |entry| entry[0] == to }
+      elsif to.starts_with?('@') && !ours && Mail.scan(here).any? { |entry| entry[0] == to }
+        how = d ? "send it with #{d} mail send #{to} TOPIC, the message on standard input" : "write it into .ai/mail/outbox/"
         {error: "Not sent: #{to} is a project on this machine, and this machine's mail carrier is " \
                 "#{carrier} (git config ai.carrier), so mail to it goes through your project's outbox: " \
-                "write it into .ai/mail/outbox/, as the dot-ai skill says (Sending)."}.to_json
+                "#{how}, as the dot-ai skill says (Sending)."}.to_json
       end
     end
 

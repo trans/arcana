@@ -65,7 +65,7 @@ module Arcana
     # The project a session in `dir` works in (dot-ai, "Projects inside
     # projects"): the nearest directory at or above it that holds `.ai/`,
     # since a directory without one belongs to the project above it.
-    # Walks the path with symbolic links resolved, as dot-ai-mail does, so
+    # Walks the path with symbolic links resolved, as dot-ai does, so
     # both find the same project. With no `.ai/` anywhere above, `dir`
     # itself, whose handle is then the fallback.
     #

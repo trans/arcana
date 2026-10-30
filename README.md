@@ -509,13 +509,13 @@ server.start  # blocking
 ## Mail between projects
 
 Projects with a `.ai/` folder ([dot-ai](https://github.com/trans/dot-ai))
-send each other mail by writing it into `.ai/mail/outbox/`, and post to
-topics the same way. Whatever moves it between projects is the
-machine's mail carrier, chosen in git config:
+send each other mail with `dot-ai mail send`, which writes it into
+`.ai/mail/outbox/`, and post to topics the same way. Whatever moves it
+between projects is the machine's mail carrier, chosen in git config:
 
 ```
 git config --global ai.carrier arcana   # Arcana carries the mail
-git config --global ai.carrier local    # dot-ai-mail does (the default)
+git config --global ai.carrier local    # dot-ai does (the default)
 ```
 
 Both carriers keep to the same files and locks (dot-ai's spec, "The
@@ -524,19 +524,25 @@ suite runs against both (`CARRIER=arcana just test` in dot-ai).
 
 Where Arcana is the carrier:
 
-- `arcana mail deliver | check | topic | read | find` does what
-  dot-ai-mail's commands do, printing the same lines.
+- `arcana mail deliver | check | topic | read | find` does what dot-ai's
+  carrier commands do, printing the same lines; `dot-ai mail` hands those
+  to it, so agents use `dot-ai mail` whichever carrier there is.
 - The session hooks (`arcana setup` installs them) deliver the outbox and
   tell the agent of new mail, new posts in the topics its project
-  follows, and read receipts, as dot-ai's hooks do.
+  follows, and read receipts, as dot-ai's hooks do. They name dot-ai's
+  commands where dot-ai is installed, and Arcana's own where it isn't.
 - Mail for an address no project on this machine has goes over the bus,
   to an agent registered there, signed with the project's key.
 
 Under any other carrier Arcana stays out of mail: its hooks say nothing
 of the inbox, and the MCP bridge refuses `arcana_deliver` to a project on
-this machine and `arcana_publish` to a `#topic`, pointing to the outbox.
-Services, and agents found only on the bus, are reached the same as
-ever.
+this machine and `arcana_publish` to a `#topic`, pointing to `dot-ai
+mail send`. Services, and agents found only on the bus, are reached the
+same as ever.
+
+Arcana doesn't need dot-ai. On a machine without it, nothing else would
+carry mail, so the bridge sends it all over the bus, and each project's
+session hooks write what comes for it into its `.ai/mail/inbox/`.
 
 ## MCP Bridge
 
