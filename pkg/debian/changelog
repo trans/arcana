@@ -1,3 +1,19 @@
+arcana (0.38.2-1) unstable; urgency=medium
+
+  * Where Arcana carries the mail, its hooks name dot-ai's commands when
+    dot-ai is installed (`dot-ai mail read`, and `dot-ai mail done` to
+    file a message, which they didn't say before), and Arcana's own when
+    it isn't. Arcana never needs dot-ai.
+  * On a machine without dot-ai, the MCP bridge sends mail to a project
+    here and posts to topics itself, over the bus, instead of refusing
+    them: nothing else would carry them. Where dot-ai carries mail, the
+    refusal names `dot-ai mail send`.
+  * A session that registered no handle at its start (the bus was down,
+    or its config couldn't be read) registers its project's handle at
+    the next prompt or Stop, and says so.
+
+ -- trans <transfire@gmail.com>  Fri, 30 Oct 2026 23:30:00 +0000
+
 arcana (0.38.1-1) unstable; urgency=medium
 
   * Services with bare names (a Toolset's: anthropic, openai, arcana,
