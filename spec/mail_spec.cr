@@ -189,8 +189,8 @@ describe "Arcana::MCP under a carrier" do
       script = dot_ai(projects, "claude", "0.5.1")
       mcp = Arcana::MCP.new(base_url: "http://127.0.0.1:9", project_dir: alpha)
       tool(mcp, "arcana_deliver", %({"to":"@beta","subject":"hi","payload":{"text":"hello"}}))["error"].as_s
-        .should eq("Not sent: @beta is a project on this machine, and this machine's mail carrier is local " \
-                   "(git config ai.carrier), so mail to it goes through your project's outbox: send it with " \
+        .should eq("Not sent: @beta is a project on this machine, and this machine's mail carrier is local, " \
+                   "the default (git config ai.carrier sets another), so mail to it goes through your project's outbox: send it with " \
                    "sh \"#{script}\" mail send @beta TOPIC, the message on standard input, as the dot-ai skill says (Sending).")
       tool(mcp, "arcana_publish", %({"topic":"#news","payload":{"text":"hello"}}))["error"].as_s
         .should start_with("Not posted: this machine's mail carrier is local")
@@ -211,6 +211,32 @@ describe "Arcana::MCP under a carrier" do
         .should_not start_with("Not sent")
       tool(mcp, "arcana_publish", %({"topic":"#news","payload":{"text":"hello"}}))["error"].as_s
         .should_not start_with("Not posted")
+    end
+  end
+
+  it "says in the tools' descriptions, first, what they refuse" do
+    describe_tool = ->(mcp : Arcana::MCP, name : String) do
+      mcp.tools.as_a.find! { |t| t["name"] == name }["description"].as_s
+    end
+    machine(nil) do |projects|
+      alpha = mail_project(projects, "alpha")
+      script = dot_ai(projects, "claude", "0.5.1")
+      mcp = Arcana::MCP.new(base_url: "http://127.0.0.1:9", project_dir: alpha)
+      describe_tool.call(mcp, "arcana_deliver").should start_with("Not for mail to another project on this machine")
+      describe_tool.call(mcp, "arcana_deliver").should contain(%(`sh "#{script}" mail send @handle TOPIC`))
+      describe_tool.call(mcp, "arcana_publish").should start_with("Not for `#topics`")
+      describe_tool.call(mcp, "arcana_inbox").should_not contain("Not for")
+    end
+    machine("arcana") do |projects|
+      mcp = Arcana::MCP.new(base_url: "http://127.0.0.1:9", project_dir: mail_project(projects, "alpha"))
+      describe_tool.call(mcp, "arcana_deliver").should start_with("Send a message on the Arcana bus")
+      describe_tool.call(mcp, "arcana_publish").should start_with("A `#topic` kept as files on this machine")
+      describe_tool.call(mcp, "arcana_publish").should contain("write it into `.ai/mail/outbox/`")
+    end
+    machine(nil) do |projects| # no dot-ai: the tools carry everything
+      mcp = Arcana::MCP.new(base_url: "http://127.0.0.1:9", project_dir: mail_project(projects, "alpha"))
+      describe_tool.call(mcp, "arcana_deliver").should start_with("Send a message on the Arcana bus")
+      describe_tool.call(mcp, "arcana_publish").should start_with("Post to a topic on the Arcana bus")
     end
   end
 

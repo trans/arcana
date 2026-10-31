@@ -561,4 +561,10 @@ describe "Arcana::Hook.write_note" do
     Arcana::Hook.mail_topic("Ünïcode — only?").should eq("n-code-only")
     Arcana::Hook.mail_topic("!!!").should be_nil
   end
+
+  it "keeps a . between digits, as dot-ai does, and only there" do
+    Arcana::Hook.mail_topic("Deploy landing-v0.8.2… (e.g. 1.2.3.4_x)").should eq("deploy-landing-v0.8.2-e-g-1.2.3.4-x")
+    Arcana::Hook.mail_topic("Re: #arcana.releases -- v0.").should eq("re-arcana-releases-v0")
+    Arcana::Hook.mail_topic("x" * 48 + ".9.9").should eq("x" * 48 + "-9")
+  end
 end

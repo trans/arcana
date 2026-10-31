@@ -466,12 +466,14 @@ module Arcana
       path
     end
 
-    # A subject as a file name's topic: lowercased, each run of anything
-    # but `a-z`, `0-9`, `.` and `-` turned into `-`, trimmed of `-`, and
-    # cut to 50 characters. Nil when nothing is left.
+    # A subject as a file name's topic (the dot-ai spec's File names), as
+    # dot-ai makes one: lowercased, each run of anything but `a-z` and
+    # `0-9` turned into one `-`, except a `.` between digits
+    # (`landing-v0.8.2`), trimmed of `-`, and cut to 50 characters. Nil
+    # when nothing is left.
     def self.mail_topic(subject : String?) : String?
       return nil unless subject
-      subject.downcase.gsub(/[^a-z0-9.-]+/, "-").strip('-')[0, 50].rstrip('-').presence
+      subject.downcase.gsub(/(?:[^a-z0-9.]|(?<![0-9])\.|\.(?![0-9]))+/, "-").strip('-')[0, 50].rstrip("-.").presence
     end
 
     # A message as a mail file holds it, after the header lines and their

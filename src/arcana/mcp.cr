@@ -39,7 +39,7 @@ module Arcana
       },
       {
         name:        "arcana_deliver",
-        description: "Send a message on the Arcana bus. By default (ordering: auto), the bus decides sync vs async based on the target: services get sync (blocks for reply), agents get async (fire and forget, check arcana_receive later). Override with ordering 'sync' or 'async'. The response tells you which mode was used and the correlation_id for tracking. Each message from the project's own handle to an agent gets its dot-ai message id (the response's `id`), carried with it; in a project with `.ai/mail/sent/`, it is also filed there as the sender's copy, named in the response's `sent_file`: don't file it again. To answer a message, pass its id (its inbox file's `Id:`) as `re`. Mail to an agent whose project is on this machine goes through your project's outbox instead (the dot-ai skill), and where the machine's mail carrier isn't Arcana (git config ai.carrier), this tool refuses it.",
+        description: "Send a message on the Arcana bus. By default (ordering: auto), the bus decides sync vs async based on the target: services get sync (blocks for reply), agents get async (fire and forget, check arcana_receive later). Override with ordering 'sync' or 'async'. The response tells you which mode was used and the correlation_id for tracking. Each message from the project's own handle to an agent gets its dot-ai message id (the response's `id`), carried with it; in a project with `.ai/mail/sent/`, it is also filed there as the sender's copy, named in the response's `sent_file`: don't file it again. To answer a message, pass its id (its inbox file's `Id:`) as `re`.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -56,7 +56,7 @@ module Arcana
       },
       {
         name:        "arcana_publish",
-        description: "Post to a topic on the Arcana bus. A `#topic` (registered with arcana_register kind \"topic\") is a shared log: the post is stored once and numbered, anyone reads it with arcana_inbox, and subscribers get a short notification. The reply gives the post's number (`seq`). A topic name without `#` sends every subscriber a full copy instead. A topic kept as files on this machine (the dot-ai skill's Topics) takes posts through your project's outbox, and where the machine's mail carrier isn't Arcana (git config ai.carrier), every `#topic` does: this tool refuses those.",
+        description: "Post to a topic on the Arcana bus. A `#topic` (registered with arcana_register kind \"topic\") is a shared log: the post is stored once and numbered, anyone reads it with arcana_inbox, and subscribers get a short notification. The reply gives the post's number (`seq`). A topic name without `#` sends every subscriber a full copy instead.",
         inputSchema: {
           type:       "object",
           properties: {
@@ -234,7 +234,7 @@ module Arcana
         nil # no response needed
 
       when "tools/list"
-        jsonrpc_result(id, {tools: TOOLS})
+        jsonrpc_result(id, {tools: tools})
       when "tools/call"
         tool_name = params.str("name")
         args = params["arguments"]? || JSON::Any.new({} of String => JSON::Any)
@@ -445,6 +445,34 @@ module Arcana
       http_post("/publish", body)
     end
 
+    # TOOLS as this machine has them: arcana_deliver and arcana_publish
+    # say what `not_ours` refuses, first, so an agent knows before it
+    # writes a message the tool would refuse.
+    def tools : JSON::Any
+      list = JSON.parse(TOOLS.to_json)
+      found = Mail.dot_ai
+      d = found || "dot-ai"
+      notes = if Mail.carrier?
+                how = found ? "post with `#{d} mail send '#topic' TOPIC`, the message on standard input" : "write it into `.ai/mail/outbox/`"
+                {"arcana_publish" => "A `#topic` kept as files on this machine (the dot-ai skill's Topics) " \
+                                     "is not for this tool, which refuses it: #{how}."}
+              elsif Mail.dot_ai?
+                {"arcana_deliver" => "Not for mail to another project on this machine (an agent whose project " \
+                                     "has `.ai/`; `#{d} mail find` lists them): this tool refuses it, so send it " \
+                                     "with `#{d} mail send @handle TOPIC`, the message on standard input.",
+                 "arcana_publish" => "Not for `#topics`, which on this machine are kept as files: this tool " \
+                                     "refuses them, so post with `#{d} mail send '#topic' TOPIC`, the message on " \
+                                     "standard input."}
+              else
+                {} of String => String
+              end
+      list.as_a.each do |tool|
+        next unless note = notes[tool["name"].as_s]?
+        tool.as_h["description"] = JSON::Any.new("#{note} #{tool["description"].as_s}")
+      end
+      list
+    end
+
     # Mail between the projects on this machine, and posts to its topics,
     # go through the sender's outbox, and the machine's carrier (git
     # config's `ai.carrier`, see `Mail`) takes them from there. Where
@@ -460,11 +488,12 @@ module Arcana
       ours = carrier == Mail::NAME
       return nil unless ours || Mail.dot_ai?
       d = Mail.dot_ai
+      said = carrier == "local" ? "local, the default (git config ai.carrier sets another)" : "#{carrier} (git config ai.carrier)"
       if to.starts_with?('#')
         how = d ? "post it with #{d} mail send '#{to}' TOPIC, the message on standard input" : "write it into .ai/mail/outbox/ addressed to #{to}"
         home = Mail.topic_home(here)[0]
         if !ours
-          {error: "Not posted: this machine's mail carrier is #{carrier} (git config ai.carrier), " \
+          {error: "Not posted: this machine's mail carrier is #{said}, " \
                   "which keeps topics as files, so a post to #{to} goes through your project's outbox: " \
                   "#{how}, as the dot-ai skill says (Topics)."}.to_json
         elsif home && Dir.exists?(File.join(home, to.lchop('#')))
@@ -474,7 +503,7 @@ module Arcana
       elsif to.starts_with?('@') && !ours && Mail.scan(here).any? { |entry| entry[0] == to }
         how = d ? "send it with #{d} mail send #{to} TOPIC, the message on standard input" : "write it into .ai/mail/outbox/"
         {error: "Not sent: #{to} is a project on this machine, and this machine's mail carrier is " \
-                "#{carrier} (git config ai.carrier), so mail to it goes through your project's outbox: " \
+                "#{said}, so mail to it goes through your project's outbox: " \
                 "#{how}, as the dot-ai skill says (Sending)."}.to_json
       end
     end
