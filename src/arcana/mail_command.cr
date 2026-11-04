@@ -172,7 +172,11 @@ module Arcana
         map = Mail.scan(here, error)
         address = args[0]?
         if address.nil? || address.empty?
-          map.each { |(a, d)| output.puts "%-24s %s" % {a, d} if a }
+          map.each do |(a, d)|
+            next unless a
+            mark = Mail.configured?(d) ? "" : " (no .ai/config.yml: no mail is delivered to it)"
+            output.puts "%-24s %s%s" % {a, d, mark}
+          end
           map.each { |(a, d)| output.puts "(can't read the handle) #{d}/.ai/config.yml" unless a }
           map.compact_map(&.[0]).tally.each { |a, n| output.puts "two projects have the address #{a}: nothing is delivered to it" if n > 1 }
           return 0
@@ -180,6 +184,7 @@ module Arcana
         dir, why = Mail.lookup(map, "@#{address.lchop('@')}")
         die why.not_nil! unless dir
         output.puts dir
+        error.puts "arcana mail: #{dir} has no .ai/config.yml: no mail is delivered to it" unless Mail.configured?(dir)
         0
       end
     end

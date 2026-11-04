@@ -134,6 +134,14 @@ module Arcana
     # A project's address: `@` plus its config's handle, or its
     # directory's name folded (`AgentConfig`). Nil when the config can't
     # be read or its handle isn't one.
+    # Whether the project at DIR is set up for an agent: its `.ai/` has a
+    # config. Without one, whatever folders its `.ai/` holds, no agent is
+    # there to read mail, so none is delivered to it (dot-ai's spec, Mail:
+    # Delivery).
+    def self.configured?(dir : String) : Bool
+      AgentConfig::CONFIG_FILES.any? { |f| File.file?(File.join(dir, ".ai", f)) }
+    end
+
     def self.address_of(dir : String) : String?
       handle = AgentConfig.load(dir).handle
       handle if handle.matches?(AGENT)
@@ -440,6 +448,10 @@ module Arcana
         end
         dir, why = lookup(map, to)
         if dir
+          unless configured?(dir)
+            io.puts "left in the outbox: #{name}: #{to} (#{dir}) has no .ai/config.yml, so no agent is set up there"
+            return
+          end
           dest = File.join(dir, ".ai", "mail", "inbox")
           unless Dir.exists?(dest)
             io.puts "left in the outbox: #{name}: #{to} (#{dir}) has no .ai/mail/inbox/"

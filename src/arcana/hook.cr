@@ -357,8 +357,12 @@ module Arcana
     end
 
     # Move unread mail into `.ai/mail/inbox/`, one note per message (see the
-    # dot-ai skill's mail conventions). Returns the paths written.
+    # dot-ai skill's mail conventions). Returns the paths written. Only in a
+    # project set up for an agent (`Mail.configured?`): in one without a
+    # config, nobody would read the files, so the mail stays on the bus for
+    # the next session.
     def self.drain(bus : Rest, cfg : AgentConfig) : Array(String)
+      return [] of String unless Mail.configured?(cfg.project_dir)
       status, body = bus.post("/receive", {address: cfg.handle})
       return [] of String unless status == 200 && body
       messages = body.as_a? || return [] of String

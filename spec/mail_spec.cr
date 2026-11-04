@@ -309,3 +309,30 @@ describe "Arcana::Hook following a session's project" do
     end
   end
 end
+
+describe "Arcana::Hook at session end" do
+  it "leaves mail on the bus in a project with no config, where no agent would read the files" do
+    machine(nil) do |projects|
+      bare = File.join(projects, "bare")
+      Dir.mkdir_p(File.join(bare, ".ai"))
+      staffed = mail_project(projects, "staffed")
+      bus_on(14974) do |bus, _|
+        {bare, staffed}.each do |dir|
+          name = File.basename(dir)
+          run = ->(event : String) do
+            input = IO::Memory.new({session_id: "s-#{name}", cwd: dir}.to_json)
+            Arcana::Hook.run([event, "--agent", "claude"], input, IO::Memory.new, IO::Memory.new, base_url: "http://127.0.0.1:14974")
+          end
+          run.call("session-start")
+          bus.mailbox("@#{name}").deliver(Arcana::Envelope.new(from: "@alpha", to: "@#{name}", subject: "hello"))
+          run.call("session-end")
+        end
+
+        Dir.exists?(File.join(bare, ".ai", "mail")).should be_false
+        bus.mailbox("@bare").pending.should eq(1)
+        Dir.children(File.join(staffed, ".ai", "mail", "inbox")).size.should eq(1)
+        bus.mailbox("@staffed").pending.should eq(0)
+      end
+    end
+  end
+end
