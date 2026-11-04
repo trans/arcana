@@ -1,3 +1,15 @@
+arcana (0.38.4-1) unstable; urgency=medium
+
+  * Mail is delivered only to a project with an `.ai/config.yml`: an
+    `.ai/` without one has no agent set up to read it. Such mail stays in
+    the outbox with the reason, as dot-ai 0.8.0 does.
+  * `arcana mail find` marks projects without a config, and looking one
+    up says no mail is delivered to it.
+  * At session end, mail for a project without a config is left on the
+    bus, not written into an inbox folder made for it.
+
+ -- trans <transfire@gmail.com>  Wed, 04 Nov 2026 22:00:00 +0000
+
 arcana (0.38.3-1) unstable; urgency=medium
 
   * Where dot-ai carries mail, `arcana_deliver` and `arcana_publish` say
