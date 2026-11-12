@@ -2,6 +2,7 @@ require "digest/sha256"
 require "json"
 require "yaml"
 require "./agent_config"
+require "./sessions"
 
 module Arcana
   # Arcana as a machine's mail carrier (the dot-ai spec's Mail, in the
@@ -11,9 +12,11 @@ module Arcana
   # Agents keep using `dot-ai mail`, which hands the carrier's part to
   # `arcana mail`.
   #
-  # Which carrier a machine has is git config's `ai.carrier`: `arcana`
-  # makes Arcana the carrier; under any other (`local`, dot-ai itself, the
-  # default) Arcana stays out of mail. Each run reads it afresh.
+  # Which carrier carries a person's mail is git config's `ai.carrier`,
+  # read from the person's own config only (`person_config`): `arcana`
+  # makes Arcana the carrier; under any other (`local`, dot-ai itself,
+  # the default) Arcana stays out of mail, and writes no mail files
+  # (`carries?`). Each run reads it afresh.
   #
   # What it prints matches dot-ai line for line, so dot.ai's tests
   # (`tests/dot-ai.sh`, with `CARRIER=arcana`) check both carriers. Where it
@@ -42,30 +45,59 @@ module Arcana
 
     # -- The setting ----------------------------------------------------------
 
-    def self.git_config(key : String, all : Bool = false, path : Bool = false) : Array(String)
-      args = ["config", all ? "--get-all" : "--get"]
-      args << "--type=path" if path
-      args << key
+    # The settings that are a person's, not a project's (the dot-ai spec's
+    # Config).
+    PERSON_KEYS = {"ai.carrier", "ai.path"}
+
+    # A per-person setting's values: from the person's own git config
+    # (`--global`, which takes in `$XDG_CONFIG_HOME/git/config`), else the
+    # system's, never a repository's, which a plain `git config --get`
+    # would let win. With `path`, `~` expanded.
+    def self.person_config(key : String, path : Bool = false) : Array(String)
+      {"--global", "--system"}.each do |scope|
+        values = git(["config", scope] + (path ? ["--type=path"] : [] of String) + ["--get-all", key])
+        return values unless values.empty?
+      end
+      [] of String
+    end
+
+    private def self.git(args : Array(String), dir : String? = nil) : Array(String)
       output = IO::Memory.new
-      status = Process.run("git", args, output: output, error: Process::Redirect::Close)
+      status = Process.run("git", args, output: output, error: Process::Redirect::Close, chdir: dir)
       return [] of String unless status.success?
       output.to_s.lines.map(&.chomp).reject(&.empty?)
     rescue
       [] of String
     end
 
-    # The machine's carrier, `local` when unset.
-    def self.carrier : String
-      git_config("ai.carrier").last?.try(&.strip.presence) || "local"
+    # What a repository at or above `dir` sets of the per-person keys,
+    # which is ignored: a warning line for each.
+    def self.repo_settings(dir : String) : Array(String)
+      top = git(["rev-parse", "--show-toplevel"], dir).first? || return [] of String
+      PERSON_KEYS.select { |k| !git(["config", "--local", "--get-all", k], dir).empty? }.map do |k|
+        "#{top} sets #{k} in its own git config, which is ignored: it's per person (git config --global #{k})"
+      end.to_a
     end
 
-    # Whether Arcana is this machine's carrier.
+    # The person's carrier, `local` when unset.
+    def self.carrier : String
+      person_config("ai.carrier").last?.try(&.strip.presence) || "local"
+    end
+
+    # Whether Arcana is the person's carrier.
     def self.carrier? : Bool
       carrier == NAME
     end
 
+    # Whether Arcana carries mail, and so writes mail files (inbox files,
+    # sent copies): where it's the carrier, or where there's no dot-ai to
+    # carry it (`dot_ai?`). Only the carrier writes them.
+    def self.carries? : Bool
+      carrier? || !dot_ai?
+    end
+
     def self.ai_paths : Array(String)
-      git_config("ai.path", all: true, path: true)
+      person_config("ai.path", path: true)
     end
 
     # -- dot-ai ---------------------------------------------------------------
@@ -403,16 +435,20 @@ module Arcana
         io.puts "busy: another delivery from this outbox is running"
         return
       end
+      arrived = [] of String
       begin
         map = scan(root, warn)
-        names.each { |name| deliver_one(root, box, name, sender, map, io, bus) }
+        names.each { |name| deliver_one(root, box, name, sender, map, io, bus, arrived) }
       ensure
         unlock(lock_path)
       end
+      # Each project mail reached is told, once the outbox is free
+      arrived.uniq.each { |d| Sessions.tell_project(d, io) }
     end
 
     private def self.deliver_one(root : String, box : String, name : String, sender : String,
-                                 map : Array({String?, String}), io : IO, bus : BusSend?) : Nil
+                                 map : Array({String?, String}), io : IO, bus : BusSend?,
+                                 arrived : Array(String)) : Nil
       f = File.join(box, name)
       return unless File.file?(f)
       unless name.matches?(OUTBOUND)
@@ -496,6 +532,7 @@ module Arcana
                   "(from a sandbox, leave it: the session hooks deliver it when the turn ends)"
           return
         end
+        arrived << dir
       end
 
       # File the original under sent/, with Sent: and Id: lines, and Post:

@@ -336,3 +336,108 @@ describe "Arcana::Hook at session end" do
     end
   end
 end
+
+describe "Arcana::Mail's per-person settings" do
+  it "reads ai.carrier and ai.path from the person's own git config, never a repository's, and warns of one" do
+    machine("arcana") do |projects|
+      alpha = mail_project(projects, "alpha")
+      Process.run("git", ["init", "-q", alpha])
+      Process.run("git", ["-C", alpha, "config", "ai.carrier", "local"])
+      Process.run("git", ["-C", alpha, "config", "ai.path", "/nowhere"])
+      Dir.cd(alpha) do
+        Arcana::Mail.carrier?.should be_true
+        Arcana::Mail.ai_paths.should eq([projects])
+      end
+      top = File.realpath(alpha)
+      Arcana::Mail.repo_settings(alpha).should eq([
+        "#{top} sets ai.carrier in its own git config, which is ignored: it's per person (git config --global ai.carrier)",
+        "#{top} sets ai.path in its own git config, which is ignored: it's per person (git config --global ai.path)",
+      ])
+      Arcana::Mail.repo_settings(projects).should be_empty # not a repository
+    end
+  end
+end
+
+describe "Arcana under another carrier" do
+  it "writes no mail files: the bridge's messages just come back, and nothing is filed as sent" do
+    machine(nil) do |projects|
+      alpha = mail_project(projects, "alpha")
+      dot_ai(projects, "claude", "0.9.0")
+      Arcana::Mail.carries?.should be_false
+      bus_on(14975) do |bus, directory|
+        agent(directory, "@alpha")
+        agent(directory, "@far")
+        bus.mailbox("@alpha").deliver(Arcana::Envelope.new(from: "@far", to: "@alpha", subject: "hello",
+          payload: JSON.parse(%({"text":"hi"}))))
+        bus.mailbox("@far")
+        mcp = Arcana::MCP.new(base_url: "http://127.0.0.1:14975", project_dir: alpha)
+        got = JSON.parse(mcp.test_handle(JSON.parse(%({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"arcana_receive","arguments":{"address":"@alpha"}}}))).not_nil!["result"]["content"][0]["text"].as_s)
+        got.as_a.size.should eq(1)
+        got[0]["inbox_file"]?.should be_nil
+        sent = tool(mcp, "arcana_deliver", %({"to":"@far","subject":"back","payload":{"text":"hello"}}))
+        sent["id"]?.should_not be_nil
+        sent["sent_file"]?.should be_nil
+        Dir.children(File.join(alpha, ".ai", "mail", "inbox")).should be_empty
+        Dir.children(File.join(alpha, ".ai", "mail", "sent")).should be_empty
+      end
+    end
+  end
+
+  it "leaves mail on the bus at a session's end and Stop, and says at Stop how much waits there" do
+    machine(nil) do |projects|
+      alpha = mail_project(projects, "alpha")
+      dot_ai(projects, "claude", "0.9.0")
+      bus_on(14976) do |bus, _|
+        run = ->(event : String) do
+          input = IO::Memory.new({session_id: "s-other", cwd: alpha}.to_json)
+          error = IO::Memory.new
+          code = Arcana::Hook.run([event, "--agent", "claude"], input, IO::Memory.new, error, base_url: "http://127.0.0.1:14976")
+          {code, error.to_s}
+        end
+        run.call("session-start")
+        bus.mailbox("@alpha").deliver(Arcana::Envelope.new(from: "@far", to: "@alpha", subject: "hello"))
+        code, said = run.call("stop")
+        code.should eq(2)
+        said.should contain("1 message on the Arcana bus for @alpha")
+        run.call("session-end")
+        Dir.children(File.join(alpha, ".ai", "mail", "inbox")).should be_empty
+        bus.mailbox("@alpha").pending.should eq(1)
+        Dir.exists?(Arcana::Mail::Sessions.dir).should be_false # and no session records
+      end
+    end
+  end
+end
+
+describe Arcana::Mail::Sessions do
+  it "answers arcana tell: 3 with no record or a session not open (marking it ended), 0 busy, 4 idle" do
+    machine("arcana") do |projects|
+      root = File.realpath(mail_project(projects, "alpha"))
+      s = Arcana::Mail::Sessions
+      s.own_tell("none").should eq(3)
+      s.write(s.path("busy"), {"root" => root, "agent" => "codex", "id" => "busy", "by" => "arcana", "state" => "busy"})
+      s.own_tell("busy").should eq(0)
+      s.write(s.path("idle"), {"root" => root, "agent" => "codex", "id" => "idle", "by" => "arcana", "state" => "idle"})
+      s.own_tell("idle").should eq(4)
+      gone = Process.new("true")
+      gone.wait
+      s.write(s.path("gone"), {"root" => root, "agent" => "claude", "id" => "gone", "by" => "arcana", "pid" => gone.pid.to_s, "state" => "idle"})
+      s.own_tell("gone").should eq(3)
+      s.read(s.path("gone"))["state"].should eq("ended")
+      File.info(s.dir).permissions.value.should eq(0o700)
+    end
+  end
+
+  it "names the session's runner by DOT_AI_BY, a plain name, else arcana" do
+    machine("arcana") do
+      begin
+        ENV["DOT_AI_BY"] = "aix"
+        Arcana::Mail::Sessions.by.should eq("aix")
+        ENV["DOT_AI_BY"] = "../bin/x"
+        Arcana::Mail::Sessions.by.should eq("arcana")
+      ensure
+        ENV.delete("DOT_AI_BY")
+      end
+      Arcana::Mail::Sessions.by.should eq("arcana")
+    end
+  end
+end

@@ -23,6 +23,14 @@ when "hook"
 when "mail"
   # Mail between projects, where Arcana is the carrier (git config ai.carrier).
   exit Arcana::Mail::Command.run(ARGV)
+when "tell"
+  # The carrier's tell for a session whose runner is Arcana (the dot-ai
+  # spec's Runners): 0 told at its turn's end, 3 not open, 4 can't push.
+  if ARGV.size != 1
+    STDERR.puts "usage: arcana tell ID"
+    exit 1
+  end
+  exit Arcana::Mail::Sessions.own_tell(ARGV[0])
 when "version", "--version", "-v"
   puts "Arcana v#{Arcana::VERSION}"
   exit 0
@@ -37,6 +45,7 @@ when "help", "--help", "-h"
     setup   User/machine setup — install hooks + allow-rules + MCP registration
     hook    Run a session hook: hook <session-start|stop|prompt|session-end> [--agent claude|codex]
     mail    Mail between projects, where Arcana is the carrier: mail help
+    tell    Tell session ID, whose runner is Arcana, that mail has come: tell ID
     version Show version
 
   Options:

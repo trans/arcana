@@ -385,9 +385,11 @@ module Arcana
     # the outbox's: each message the bus took is written into
     # `.ai/mail/sent/` (dot-ai: both projects keep every message between
     # them) with its `Id:`, and the result names the file (`sent_file`).
-    # Only when the project has that folder; the result carries the `id`
-    # either way. The message went even if its copy can't be written; the
-    # result then says why (`sent_error`), so the agent can file it itself.
+    # Only when the project has that folder, and Arcana carries mail
+    # (`Mail.carries?`: only the carrier writes mail files); the result
+    # carries the `id` either way. The message went even if its copy can't
+    # be written; the result then says why (`sent_error`), so the agent can
+    # file it itself.
     private def file_sent(mail : NamedTuple(id: String, name: String, message: String, sent: String?),
                           re : String?, time : Time, result : String) : String
       h = begin
@@ -399,7 +401,7 @@ module Arcana
 
       h = h.dup
       h["id"] = JSON::Any.new(mail[:id])
-      if sent = mail[:sent]
+      if (sent = mail[:sent]) && Mail.carries?
         begin
           h["sent_file"] = JSON::Any.new(Hook.write_sent(sent, mail[:name], mail[:message], time, mail[:id], re))
         rescue ex
@@ -632,13 +634,15 @@ module Arcana
     # is written into the project's `.ai/mail/inbox/` first, as the
     # session-end hook writes unread mail (dot-ai: every message between
     # projects is recorded), and the result names the file
-    # (`inbox_file`). Only for the project's own handle, and only when the
-    # project has that folder. Topic notices and service replies aren't
+    # (`inbox_file`). Only for the project's own handle, only when the
+    # project has that folder, and only where Arcana carries mail
+    # (`Mail.carries?`: only the carrier writes mail files; under another,
+    # the messages just come back). Topic notices and service replies aren't
     # mail and get no file. A message whose file can't be written still
     # comes back, with `inbox_error`, so the agent can write it itself.
     private def write_inbox_files(address : String, result : String) : String
       cfg = @self_config
-      return result unless cfg && cfg.handle == address
+      return result unless cfg && cfg.handle == address && Mail.carries?
       inbox = File.join(cfg.project_dir, ".ai", "mail", "inbox")
       return result unless Dir.exists?(inbox)
       messages = begin

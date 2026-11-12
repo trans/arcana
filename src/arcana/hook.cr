@@ -24,14 +24,16 @@ module Arcana
   #   the project has `.ai/`), then marks the handle offline. The handle stays
   #   registered, so mail sent between sessions waits for the next agent.
   #
-  # Mail between projects is the machine's carrier's (git config's
+  # Mail between projects is the person's carrier's (git config's
   # `ai.carrier`, see `Mail`). Where Arcana is the carrier, the hooks also
-  # do what dot-ai's do (`Mail::Notices`): deliver the outbox, and
-  # tell of the inbox, followed topics' new posts and receipts. Under
-  # either carrier, mail from agents still waiting on the bus is written
-  # into the project's inbox as inbox files (`drain_mail`), so the agent
-  # meets all mail the same way, through the inbox; under another carrier
-  # Arcana says nothing of it, and that carrier tells of it.
+  # do what dot-ai's do (`Mail::Notices`): deliver the outbox, tell of the
+  # inbox, followed topics' new posts and receipts, and keep the session's
+  # record (`Mail::Sessions`). Where Arcana carries mail (`Mail.carries?`),
+  # mail from agents still waiting on the bus is written into the
+  # project's inbox as inbox files (`drain_mail`), so the agent meets all
+  # mail the same way, through the inbox. Under another carrier, only that
+  # carrier writes mail files: messages on the bus stay there, and the
+  # Stop hook says how many are waiting.
   #
   # A hook must never break the session: a bus that is down, or any other
   # error, means no output and exit 0.
@@ -64,18 +66,39 @@ module Arcana
               payload["cwd"]?.try(&.as_s?).try(&.presence) || Dir.current
       project_dir = AgentConfig.project_root(start)
       mail = mail_root(start)
-      session = payload["session_id"]?.try(&.as_s?).try(&.gsub(/[^A-Za-z0-9_.-]/, "_"))
+      id = payload["session_id"]?.try(&.as_s?).try(&.presence)
+      session = id.try { |i| Mail::Sessions.key(i) }
+
+      # The session's record: busy from a prompt, idle from its start (busy
+      # if it started from compacting, which may be mid-turn) and from a
+      # Stop that lets the turn end (`stop`), ended at its end
+      case event
+      when "session-start"
+        Mail::Sessions.clean if mail
+        compact = payload["source"]?.try(&.as_s?) == "compact"
+        record_session(id, mail, agent, compact ? "busy" : "idle", start: true)
+      when "prompt" then record_session(id, mail, agent, "busy")
+      when "session-end"
+        Mail::Sessions.set_state(Mail::Sessions.path(id), "ended") if mail && id
+      end
 
       bus = Rest.new(base_url)
       case event
       when "session-start" then session_start(bus, project_dir, output, AgentConfig.broken_link(start), mail, session)
-      when "stop"          then stop(bus, project_dir, agent, payload, output, error, mail, session)
+      when "stop"          then stop(bus, project_dir, agent, payload, output, error, mail, session, id)
       when "prompt"        then prompt(bus, project_dir, agent, output, mail, session)
       else                      session_end(bus, project_dir, payload, mail, session)
       end
     rescue ex
       error.puts "arcana hook: #{ex.message}"
       0
+    end
+
+    # Writes the session `id`'s record, where Arcana is the carrier of the
+    # project at `root` (`mail_root`).
+    def self.record_session(id : String?, root : String?, agent : String, state : String, start : Bool = false) : Nil
+      return unless id && root
+      Mail::Sessions.record(id, root, agent, state, start)
     end
 
     # The project whose mail Arcana carries: the one at or above `start`
@@ -125,7 +148,7 @@ module Arcana
       })
       remember_handle(session, cfg.handle) if status
       text = if status && body
-               drain_mail(bus, cfg) if status == 200
+               drain_mail(bus, cfg) if status == 200 && Mail.carries?
                case status
                when 200 then registered_text(cfg, bus, body)
                when 409 then held_text(cfg, body)
@@ -184,20 +207,26 @@ module Arcana
     # leaves for later never loops it: Claude by exit 2 (stderr is shown to
     # the agent), Codex by `decision: block`.
     #
-    # A project with `.ai/mail/inbox/` has its bus mail written there
-    # instead (`drain_mail`). Then, with `mail` (`mail_root`), Arcana tells
-    # what dot-ai's Stop hook would (`Mail::Notices`), and otherwise
-    # nothing: the machine's carrier tells of the inbox.
+    # Where Arcana carries mail (`Mail.carries?`), a project with
+    # `.ai/mail/inbox/` has its bus mail written there instead
+    # (`drain_mail`). Then, with `mail` (`mail_root`), Arcana tells what
+    # dot-ai's Stop hook would (`Mail::Notices`) and keeps the session's
+    # record, and otherwise nothing: the carrier tells of the inbox.
     def self.stop(bus : Rest, project_dir : String, agent : String, payload : JSON::Any,
-                  output : IO, error : IO, mail : String? = nil, session : String? = nil) : Int32
+                  output : IO, error : IO, mail : String? = nil, session : String? = nil,
+                  id : String? = nil) : Int32
       cfg = AgentConfig.load(project_dir)
       handle = cfg.handle
       moved = follow_project(bus, cfg, session)
-      if Dir.exists?(File.join(cfg.project_dir, ".ai", "mail", "inbox"))
+      if Mail.carries? && Dir.exists?(File.join(cfg.project_dir, ".ai", "mail", "inbox"))
         bus.key = (cfg.key rescue nil)
         drain_mail(bus, cfg)
         text = [moved, mail.try { |m| Mail::Notices.collect("stop", m, session).presence }].compact.join("\n")
-        return keep_going(agent, text, output, error) unless text.empty?
+        unless text.empty?
+          record_session(id, mail, agent, "busy")
+          return keep_going(agent, text, output, error)
+        end
+        record_session(id, mail, agent, "idle")
         output.puts "{}" if agent == "codex"
         return 0
       end
@@ -329,7 +358,7 @@ module Arcana
 
       cfg = AgentConfig.load(project_dir)
       bus.key = (cfg.key rescue nil)
-      drain(bus, cfg) if cfg.ai_dir?
+      drain(bus, cfg) if cfg.ai_dir? && Mail.carries?
       bus.post("/presence", {address: cfg.handle, owner_token: cfg.owner_token, online: false})
       File.delete(mail_flag(cfg.handle)) if File.exists?(mail_flag(cfg.handle))
       0

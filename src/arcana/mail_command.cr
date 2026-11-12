@@ -9,7 +9,7 @@ module Arcana
     module Command
       USAGE = <<-USAGE
         arcana mail: deliver .ai/ mail between the projects on this machine,
-        as its carrier (git config ai.carrier arcana)
+        as its carrier (git config --global ai.carrier arcana)
 
           arcana mail deliver [DIR]    deliver the outbox of the project at or above DIR
           arcana mail check [DIR]      list its inbox, oldest first (exit 1 when empty)
@@ -18,6 +18,8 @@ module Arcana
           arcana mail read TOPIC [--after N] [DIR]
                                        the posts after this project's place in TOPIC,
                                        or after post N, and move the place on
+          arcana mail receipts [DIR]   the mail this project sent that has been read
+                                       since last asked, a line each (@oyl read NAME)
           arcana mail find [ADDRESS]   where ADDRESS's project is, or every project found
 
         A topic is written '#name' (quoted: the shell takes a bare # as a comment)
@@ -29,12 +31,16 @@ module Arcana
       # Returns the process exit code.
       def self.run(args : Array(String), output : IO = STDOUT, error : IO = STDERR) : Int32
         rest = args[1..]? || [] of String
+        unless {"help", "-h", "--help", nil}.includes?(args[0]?)
+          Mail.repo_settings(".").each { |l| error.puts "arcana mail: #{l}" }
+        end
         case args[0]?
-        when "deliver" then deliver(rest, output, error)
-        when "check"   then check(rest, output)
-        when "topic"   then topic(rest, output)
-        when "read"    then read(rest, output)
-        when "find"    then find(rest, output, error)
+        when "deliver"  then deliver(rest, output, error)
+        when "check"    then check(rest, output)
+        when "topic"    then topic(rest, output)
+        when "read"     then read(rest, output)
+        when "receipts" then receipts(rest, output)
+        when "find"     then find(rest, output, error)
         when "help", "-h", "--help", nil
           output.puts USAGE
           0
@@ -54,7 +60,7 @@ module Arcana
       # Under any other carrier, Arcana stays out of mail.
       private def self.only_ours : Nil
         c = Mail.carrier
-        die "this machine's carrier is #{c} (git config ai.carrier), so Arcana stays out of mail" unless c == NAME
+        die "this person's carrier is #{c} (git config ai.carrier), so Arcana stays out of mail" unless c == NAME
       end
 
       private def self.root_of(dir : String) : String
@@ -167,6 +173,13 @@ module Arcana
         0
       end
 
+      private def self.receipts(args : Array(String), output : IO) : Int32
+        only_ours
+        root = root_of(args[0]? || ".")
+        Mail.receipts(root).each { |l| output.puts l.lchop("  ") }
+        0
+      end
+
       private def self.find(args : Array(String), output : IO, error : IO) : Int32
         here = Mail.project_root(".") || (File.realpath(".") rescue Dir.current)
         map = Mail.scan(here, error)
@@ -229,8 +242,11 @@ module Arcana
             " under .ai/mail/sent/: commit " << them << ".\n"
         end
         lines.each do |l|
-          next unless l.starts_with?("error: ") || l.starts_with?("left in the outbox: ")
+          next unless l.starts_with?("error: ") || l.starts_with?("left in the outbox: ") || l.starts_with?("not told: ")
           say << "Arcana: " << l << "\n" if untold.call("out:#{l}")
+        end
+        Mail.repo_settings(root).each do |l|
+          say << "Arcana: " << l << "\n" if untold.call("repo:#{l}")
         end
 
         fresh = Mail.inbox(root).select { |n| untold.call("in:#{n}") }
