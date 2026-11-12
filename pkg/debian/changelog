@@ -1,3 +1,19 @@
+arcana (0.39.0-1) unstable; urgency=medium
+
+  * Where Arcana carries mail, its hooks keep a record of each session in
+    the person's state folder, as dot-ai does, and delivery tells the
+    newest open session of each project through that session's runner:
+    Arcana's own (`arcana tell`), or the program a runner registered,
+    once it and its registration are the person's alone. A runner that
+    isn't registered counts as unable to push; one that fails is named.
+  * `ai.carrier` and `ai.path` come only from the person's own git
+    config, with a warning naming a repository that sets them.
+  * Where another carrier carries mail, the hooks and the bridge leave the
+    mail files to it.
+  * `arcana mail receipts` lists the receipts.
+
+ -- trans <transfire@gmail.com>  Thu, 12 Nov 2026 22:00:00 +0000
+
 arcana (0.38.4-1) unstable; urgency=medium
 
   * Mail is delivered only to a project with an `.ai/config.yml`: an
